@@ -1,0 +1,2203 @@
+
+/*==============================================*/
+/* UpdateSystem                                 */
+/*----------------------------------------------*/
+/* systemdataから設定情報を読み出す             */
+/* 設定情報をソフトのシステムに反映する         */
+/*==============================================*/
+*UpdateSystem
+	notesel systemdata
+	noteload "system\\data\\systemdata.dat"
+	noteget softName,1
+	noteget serverDomain,5							// サーバのドメイン名
+	noteget dataPath,7								// バージョン確認データのパス
+	noteget version,9 : version = int(version)		// ソフトのバージョン
+	noteget sizeX,11 : sizeX = int(sizeX)			// ウインドウのXサイズ
+	noteget sizeY,13 : sizeY = int(sizeY)			// ウインドウのYサイズ
+	noteget permissionTrack,15 : permissionTrack = int(permissionTrack)				// 許可するトラックの認識数
+	noteget trackAreaMoveOnce,17 : trackAreaMoveOnce = int(trackAreaMoveOnce)		// ボタンを押した時のトラックエリア移動回数
+	noteget trackAreaMoveSpeed,19 : trackAreaMoveSpeed = int(trackAreaMoveSpeed)	// ボタンを押した時のトラックエリア移動速度
+	noteget trackAreaScroll,21 : trackAreaScroll = int(trackAreaScroll)				// スクロールした時のトラックエリア移動速度
+	noteget trackDataSaveSlot,23 : trackDataSaveSlot = int(trackDataSaveSlot)		// トラックデータのセーブ可能スロット数
+	return
+
+/*==============================================*/
+/* LoadSettingData                              */
+/*----------------------------------------------*/
+/* systemdataから設定情報を読み出す             */
+/* 設定情報をソフトのシステムに反映する         */
+/*==============================================*/
+*LoadSettingData
+	notesel systemdata
+	noteload "system\\data\\systemdata.dat"
+	for i,27,34,1
+		noteget string,i : settingData(i-27) = int(string)
+	next
+	return
+
+/*==============================================*/
+/* SaveSettingData                              */
+/*----------------------------------------------*/
+/* systemdataに設定情報を保存する               */
+/*==============================================*/
+*SaveSettingData
+	notesel systemdata
+	noteload "system\\data\\systemdata.dat"
+	for i,27,34,1
+		noteadd ""+settingData(i-27),i,1
+	next
+	notesave "system\\data\\systemdata.dat"
+	return
+
+/*==============================================*/
+/* LoadVolumeData                               */
+/*----------------------------------------------*/
+/* systemdataから設定情報を読み出す             */
+/* 設定情報をソフトのシステムに反映する         */
+/*==============================================*/
+*LoadVolumeData
+	notesel systemdata
+	noteload "system\\data\\systemdata.dat"
+	noteget string,25 : masterVolume = int(string)
+	return
+
+/*==============================================*/
+/* SaveVolumeData                               */
+/*----------------------------------------------*/
+/* systemdataに音量情報を保存する               */
+/*==============================================*/
+*SaveVolumeData
+	notesel systemdata
+	noteload "system\\data\\systemdata.dat"
+	noteadd ""+masterVolume,25,1
+	notesave "system\\data\\systemdata.dat"
+	return
+
+/*==============================================*/
+/* ResetSystemStatus                            */
+/*----------------------------------------------*/
+/* ソフトの状態をリセットする                   */
+/*==============================================*/
+*ResetSystemStatus
+	/* 再生に関する状態 */
+	play = 0						// 再生状態
+	playTrack = 1					// 再生するトラック番号
+	playMode = 0					// 設定中の再生モード
+	pausePosition = 0				// 一時停止している場所
+	kokoSetTrack = 0				// ココ●●を設定するトラック
+	kokoSetTime = 0					// ココ●●を設定をする再生位置
+	shufflePointer = 0				// シャッフル再生リストの再生中場所を示す
+	loopLimaining = 0				// 追加ループのループ残数
+	volume = 0						// 音量
+	/* トラック設定に関する状態 */
+	nonPlayTrack = 0				// 再生禁止曲の設定数
+	favoriteTrack = 0				// お気に入り曲の設定数
+	
+	/* CD認識に関する状態 */
+	allTrack = 0					// 認識しているトラック数
+	cdCheckCycle = 10				// CDの確認を行う間隔
+	cdCheckTimer = cdCheckCycle		// CDの確認を行うタイマー
+	CdCode = ""						// CDを識別するコード
+	alertByTrackOverFlag = 0		// トラック許容を超えた場合に表示される警告の表示フラグ
+	alertByTrackOverFlagChange = 0	// 上記警告フラグの操作許可フラグ(関数に対する変数)
+	
+	/* タイトルバーに表示する再生情報 */
+	titleDrawTimerSet = 5				// 表示更新する間隔
+	titleDrawTimer = titleDrawTimerSet	// タイムリミットのカウント用
+	
+	// マウス関連
+	mousewheel = 0					// マウスホイールの回転値
+	clickSpeed = 25					// クリック（押して離す）スピード、長押し判定で利用
+	
+	/* バージョン確認用データの情報に関する */
+	latestVersion = 0				// 最新バージョン
+	releaseDate = ""				// 最新バージョンがリリースされた日
+	for i,0,40,1
+		updateMessage(i) = "#null"	// アップデートメッセージ
+	next
+	
+	/* 処理サイクルコントロール */
+	waitCount = 1
+	waitTime = 1
+	cycleMode = 0
+	
+	/* 音量に関する変数 */
+	//masterVolume = 0				// マスタ音量
+	dbMasterVolumeGageAtOne = 200.0 / 255.0
+	//applicationVolume = 25		// アプリ音量
+	//trackBaseVolume = 750			// トラック音量(基礎)
+	for i,0,permissionTrack,1		// トラック音量
+		trackVolume(i) = 50
+	next
+	
+	getMasterVolumeTimerCycle = 15		// マスタ音量取得周期
+	getMasterVolumeTimer = getMasterVolumeTimerCycle
+	
+	/* トラック設定保存画面に関する状態 */
+	savePageNumber = 0				// 画面に表示されている設定画面のページ番号
+	modeSaveLoad = 0				// 保存モード(1)or読み込みモード(0)
+	saveDataTitle = ""				// 保存するトラックデータのタイトル
+	for i,0,5,1
+		saveTitleList(i)=""			// 表示用の既存設定データの名前
+	next
+	maxPage = 9						// 設定画面の最大ページ数
+	titleLoadFlag = 0				// 表示用の既存設定データの所得フラグ
+	inputBoxFlag = 0				// 入力ボックスの表示フラグ
+	modeEnd	= 0						// 特定の操作でモードを自動終了させるためのフラグ
+	
+	/* 走査案愛を表示するための変数 */
+	oparationNumber = 0				// 操作番号(描画する走査案内の分岐に使用する)
+	
+	/* 画面に関する状態 */
+	SM_None = 0						// O : 割り当てなし		[S]
+	SM_VersionCheck = 1				// 1 : バージョン確認	[S]
+	SM_NewVersion = 2				// 2 : 新バージョン発見	[S]
+	SM_CDInsertWait = 5				// 5 : CD挿入待機		[I,T,C]
+	SM_PlayMenut = 6				// 6 : CD再生メニュー	[I,T,C]
+	SM_DeleteTrackSetting = 7		// 7 : トラック設定全消去の確認[I]
+	SM_KokoSetting = 8				// 8 : ココカラ･ココマデ設定[I]
+	SM_TrackDataSave = 9			// 9 : 設定の保存画面   [I,T,C]
+	SM_SystemSetting = 10			// 10: システム設定画面 [I,T,C]
+	SM_EjectMenu = 11				// 11: イジェクトメニュー
+	SM_TrackInfomation = 12			// 12: トラック情報画面 [I]
+	SM_VolumeControl = 13			// 13: 音量操作画面     [I,T]
+	SM_SystemSettingCDWait = 14     // 14: システム設定画面(CD挿入待機)[I]
+	SM_VolumeControlCDWait = 15		// 15: 音量操作画面(CD挿入待機)[I,T]
+	screenMode = SM_VersionCheck	// 表示する画面の番号
+	/* 操作番号 */
+	ON_PlayButton = 1				// 1 : 再生ボタン
+	ON_StopButton = 2				// 2 : 停止ボタン
+	ON_PauseButton = 3				// 3 : 一時停止ボタン
+	ON_PrevButton = 4				// 4 : 前曲ボタン
+	ON_NextButton = 5				// 5 : 次曲ボタン
+	ON_TrackButtonNormal = 6		// 6 : トラックボタン(通常)
+	ON_TrackButtonNPTrack = 7		// 7 : トラックボタン(再生禁止)
+	ON_TrackButtonFVTrack = 8		// 8 : トラックボタン(お気に入り)
+	ON_TrackButtonNPFVTrack = 9		// 9 : トラックボタン(再生禁止・お気に入り)
+	ON_SeekBar = 10					// 10: シークバー
+	ON_TrackAreaMoveButton = 11		// 11: トラックエリア移動ボタン
+	ON_EjectButton = 12				// 12: 取り出しボタン
+	ON_FileButton = 13				// 13: ファイルボタン
+	ON_SettingButton = 14			// 14: 設定ボタン
+	ON_SettingClearButton = 15		// 15: 設定クリアボタン
+	ON_PlaymodeButton = 16			// 16: 再生モードボタン
+	ON_AddLoopButton = 17			// 17: 追加ループボタン
+	ON_VolumeButton = 18			// 18: 音量ボタン
+	ON_SeekBarTrackInfo = 30		// 30: シークバー(トラック情報画面)
+	ON_NPButtonTrackInfo = 31		// 31: 再生禁止曲ボタン(トラック情報画面)
+	ON_FVButtonTrackInfo = 32		// 32: お気に入り曲ボタン(トラック設定画面)
+	/* 再生モードに関する状態 */
+	PM_Normal = 0					// 0 : 通常再生
+	PM_SongLoop = 1					// 1 : １曲ループ
+	PM_AllLoop = 2					// 2 : 全曲ループ
+	PM_Shuffle = 3					// 3 : シャッフル
+	/* トラックボタンに関する状態 */
+	trackAreaMoveX = 0				// トラックボタンの横スクロール量
+	trackMoveFlag = 0				// トラックボタンの移動フラグ
+	trackMoveCount = 0				// トラックボタン移動ボタンによる移動量を測定
+	/* 画像表示に関する状態 */
+	celputX = 0						// 画像描画時に用いるX位置データ
+	celputY = 0						// 画像描画時に用いるY座標データ
+
+	return
+
+/*==============================================*/
+/* ProcessCycleControl                          */
+/*----------------------------------------------*/
+/* 処理サイクルコントローラ                     */
+/*==============================================*/
+*ProcessCycleControl
+	/* マウスカーソルが無効または画面外にポインタがある場合は処理を間引く    */
+	/* フラグ変数であるcycleModeを操作することで意図的に処理速度を制御できる */
+	if(ginfo(2)=0 | (MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=0 & MousePosGet("y")<=sizeY)){
+		if(waitTime > 1){
+			waitCount -= waitTime
+		}
+		waitTime = 1
+	}else{
+		if(play = 1){
+			// 再生時(画面更新が必要)は10
+			if(waitTime > 7){
+				waitCount -= waitTime
+			}
+			waitTime = 7
+		}else{
+			// 停止時(画面更新が不要)は100
+			if(waitTime > 100){
+				waitCount -= waitTime
+			}
+			waitTime = 100
+		}
+	}
+	return
+
+
+/*==============================================*/
+/* UpdateSystemArea_CommonProcess               */
+/*----------------------------------------------*/
+/* 共通処理                                     */
+/*==============================================*/
+*UpdateSystemArea_CommonProcess
+	// windowsからマスタボリューム値を取得する
+	getMasterVolumeTimer--
+	if(getMasterVolumeTimer=0){
+		masterVolume = getMasterVolume()
+		getMasterVolumeTimer = getMasterVolumeTimerCycle
+	}
+	
+	return
+
+
+/*==============================================*/
+/* DrawOperationInfomation                      */
+/*----------------------------------------------*/
+/* 操作案内を表示する                           */
+/*==============================================*/
+*DrawOperationInfomation
+	// 設定で操作案内を表示するようになって入れば、表示する
+	if(settingData(6)=1){
+		if(oparationNumber = ON_PlayButton){
+			// 再生ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "トラック "+playTrack+" を再生"
+		}else:if(oparationNumber = ON_StopButton){
+			// 停止ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "再生を停止"
+		}else:if(oparationNumber = ON_PauseButton){
+			// 一時停止ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "再生を一時停止"
+		}else:if(oparationNumber = ON_PrevButton){
+			// 前曲ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "(開始5秒以内)前の曲 / (5秒以降)曲を最初から"
+		}else:if(oparationNumber = ON_NextButton){
+			// 次曲ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "次の曲"
+		}else:if(oparationNumber >= ON_TrackButtonNormal && oparationNumber<=ON_TrackButtonNPFVTrack){
+			// トラックボタン
+			color 121,171,111 : boxf 0,0,sizeX,41
+			color 211,227,208 : boxf 0,0,sizeX,40
+			ImageAlphaSet 0
+			pos 2,1   : celput ClickIcon,0
+			pos 197,1 : celput ClickIcon,1
+			pos 2,21   : celput ClickIcon,2
+			pos 197,21 : celput ClickIcon,3
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "曲切り替え"
+			if(oparationNumber = ON_TrackButtonNPTrack || oparationNumber = ON_TrackButtonNPFVTrack){
+				pos 217,2 : print "再生禁止曲を解除"
+			}else{
+				pos 217,2 : print "再生禁止曲に設定"
+			}
+			pos 22,22 : print "トラック情報を表示"
+			if(oparationNumber = ON_TrackButtonFVTrack || oparationNumber = ON_TrackButtonNPFVTrack){
+				pos 217,22 : print "お気に入り曲を解除"
+			}else{
+				pos 217,22 : print "お気に入り曲に設定"
+			}
+		}else:if(oparationNumber = ON_SeekBar){
+			// シークバー
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1   : celput ClickIcon,0
+			pos 197,1 : celput ClickIcon,1
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "再生位置のシーク"
+			pos 217,2 : print "ココカラ/ココマデ設定"
+		}else:if(oparationNumber = ON_TrackAreaMoveButton){
+			// トラックエリア移動ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "ボタンを横にスライドする"
+		}else:if(oparationNumber = ON_EjectButton){
+			// 取り出しボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "ディスクトレイを開く"
+		}else:if(oparationNumber = ON_FileButton){
+			// ファイルボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "データ保存・読み込み"
+		}else:if(oparationNumber = ON_SettingButton){
+			// 設定ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "ソフトウェア設定"
+		}else:if(oparationNumber = ON_SettingClearButton){
+			// 設定クリアボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "トラック設定をクリア"
+		}else:if(oparationNumber = ON_PlaymodeButton){
+			// 再生モードボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			if(playMode = PM_Normal){
+				pos 22,2 : print "再生モードを １曲ループ に切り替え"
+			}else:if(playMode = PM_SongLoop){
+				pos 22,2 : print "再生モードを 前曲ループ に切り替え"
+			}else:if(playMode = PM_AllLoop){
+				pos 22,2 : print "再生モードを シャッフル に切り替え"
+			}else:if(playMode = PM_Shuffle){
+				pos 22,2 : print "再生モードを 通常再生 に切り替え"
+			}
+		}else:if(oparationNumber = ON_AddLoopButton){
+			// 追加ループボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1   : celput ClickIcon,0
+			pos 197,1 : celput ClickIcon,1
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "追加ループ回数＋１"
+			pos 217,2 : print "追加ループ回数－１"
+		}else:if(oparationNumber = ON_VolumeButton){
+			// 音量ボタン
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "音量操作"
+		}else:if(oparationNumber = ON_SeekBarTrackInfo){
+			// シークバー(トラック情報画面)
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "ココカラ/ココマデ設定"
+		}else:if(oparationNumber = ON_NPButtonTrackInfo){
+			// 再生禁止曲ボタン(トラック情報画面)
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "再生禁止曲 切り替え"
+		}else:if(oparationNumber = ON_FVButtonTrackInfo){
+			// お気に入り曲ボタン(トラック情報画面)
+			color 121,171,111 : boxf 0,0,sizeX,21
+			color 211,227,208 : boxf 0,0,sizeX,20
+			ImageAlphaSet 0
+			pos 2,1 : celput ClickIcon,0
+			ImageAlphaReset
+			color 0,0,100 : ChangeFontSize 16
+			pos 22,2 : print "お気に入り曲 切り替え"
+		}
+		oparationNumber = 0
+	}
+	return
+
+/*==============================================*/
+/* UpdateSystemArea_MainSystemControl           */
+/*----------------------------------------------*/
+/* メイン画面のシステム制御                     */
+/*==============================================*/
+*UpdateSystemArea_MainSystemControl
+	// マウスホイール値の取得
+	mousewheel = mousew
+	// 音量値の取得
+	//getvol volume, 1
+	// 自動トラック切り替え（『曲長さ-50ミリ秒』に達したら次のトラックに切り替える）
+	AutoTrackChange
+	// タイトルに再生情報を表示の設定がされていれば実行
+	if(settingData(2)=1 /*& titleDrawTimer=0*/ & ginfo(2)!=0){
+		if(play=1){
+			title "["+playTrack+"] "+SecondToTime(GetNowPosition())+" / "+SecondToTime(GetTrackLength(playTrack))
+		else{
+			title "[--] --:-- 停止中"
+		}
+//		titleDrawTimer = titleDrawTimerSet
+	}else/*:if(titleDrawTimer=0)*/{
+		title softName+" ver"+VersionIntToString(version)
+//		titleDrawTimer = titleDrawTimerSet
+	}
+	titleDrawTimer--
+	
+	return
+
+/*==============================================*/
+/* UpdateSystemArea_None                        */
+/*----------------------------------------------*/
+/* 無情報画面                                   */
+/*==============================================*/
+*UpdateSystemArea_None
+	pos 0,0 : celput 4
+	return
+
+/*==============================================*/
+/* UpdateSystemArea_CheckVersion                */
+/*----------------------------------------------*/
+/* バージョン確認画面                           */
+/*==============================================*/
+*UpdateSystemArea_CheckVersion
+	pos 0,0 : celput 4
+	color 0,0,100
+	//font "HGSｺﾞｼｯｸE",18
+	ChangeFontSize 18
+	pos 140,40 : print "インターネットに接続して"
+	pos 140,80 : print "バージョンを確認しています..."
+	color 0,0,255
+	//font "HGSｺﾞｼｯｸE",16
+	ChangeFontSize 16
+	pos 340,0 : print "ver "+VersionIntToString(version)
+	redraw 1
+	redraw 0
+	/*--------------------- タカズネットワークコネクションの実行 ---------------------*/
+	// ソケットを開く
+	sockopen 0,serverDomain,80
+	// 接続エラー時の処理
+	if(stat!=0){
+		screenMode=SM_CDInsertWait
+		return
+	}
+	// HTTPリクエスト送信
+//	dialog "GET "+dataPath+" HTTP/1.1\nHost:"+serverDomain+"\n\n",0,""
+	sockput "GET "+dataPath+" HTTP/1.1\nHost:"+serverDomain+"\n\n"
+	#define BUFSIZE 2048			// 受信バッファサイズ2048バイト
+	// 応答を待つ
+	repeat
+		wait 1				//ちょっと待って
+		sockcheck 0			//受信できるデータがあれば
+		if(stat=0){
+			break			//ループを抜ける
+		}
+	loop
+	// BUFSIZE分ReceiveData変数を確保 and 初期化
+	sdim ReceiveData,BUFSIZE		//受信バッファ2048バイト
+	// 受信処理
+	sockget ReceiveData,BUFSIZE,0
+	// 取得したデータを解析
+	notesel ReceiveData
+	// HTTPレスポンスのヘッダを取り除く
+	versionDataLine = 0
+	repeat
+		noteget string,versionDataLine
+		versionDataLine++
+		if(string = ""){
+			break
+		}
+	loop
+	// バージョンデータを取り出す
+	noteget latestVersion,versionDataLine+1 : latestVersion = int(latestVersion)
+	noteget releaseDate,versionDataLine+3
+	for i,versionDataLine,versionDataLine+40,1
+		noteget string,i+5
+		if(string = "#end"){
+			i=versionDataLine+40
+		}else{
+			updateMessage(i-versionDataLine) = string
+		}
+	next
+	// バージョンの確認 , 新バージョンであれば案内する
+	if(version < latestVersion){
+		// ダイアログに表示する文字列の生成
+		string =  "【新しいバージョンが配信されています ダウンロードページを開きますか？】\n\n"
+		string += "新しいバージョン : ver"+VersionIntToString(latestVersion)+"  （配信開始 : "+releaseDate+" ）\n\n"
+		for i,0,40,1
+			if(updateMessage(i)!="#null"){
+				string+=updateMessage(i)+"\n"
+			}else{
+				i=40
+			}
+		next
+		dialog string,2,"バージョンアップのご案内"
+		if(stat = 6){
+			exec "http://takassoft.web.fc2.com/soft/tcdp/",16
+			/* 【ver3.62からの追加】セーブデータをCドライブに移す */
+			/* ＨＤＤにタカズソフトウェアの専用フォルダが存在するか確認（無ければ作成） */
+			exist "C:\\takas\\dirinfo.dat"
+			if(strsize=-1){
+				mkdir "C:\\takas"
+				notesel data
+				noteload "system\\data\\dirinfo.dat"
+				notesave "C:\\takas\\dirinfo.dat"
+			}
+			/* 専用フォルダが存在するか確認（無ければ作成） */
+			save_time=""+time_year+""+time_month+""+time_day+""+time_h+""+time_m+""+time_s+""
+			exist "C:\\takas\\twf001\\dirinfo.dat"
+			if(strsize=-1){
+				mkdir "C:\\takas\\twf001"
+				notesel data
+				noteload "system\\data\\dirinfo.dat"
+				notesave "C:\\takas\\twf001\\dirinfo.dat"
+			}
+			bcopy "system\\data\\systemdata.dat","C:\\takas\\twf001\\movedata.dat"
+			bcopy "system\\data\\trackdata.dat","C:\\takas\\twf001\\movetrack.dat"
+		}
+	}
+	screenMode=SM_CDInsertWait
+	return
+	
+/*==============================================*/
+/* UpdateSystemArea_VersionUp                   */
+/*----------------------------------------------*/
+/* バージョンアップ案内画面                     */
+/*==============================================*/
+*UpdateSystemArea_VersionUp
+	pos 0,0 : celput SystemArea
+	return
+
+/*==============================================*/
+/* UpdateInfomationArea_Wait                    */
+/*----------------------------------------------*/
+/* CD挿入待機時のInfomationAreaを更新する       */
+/* CD挿入時には別のサブルーチンが呼ばれる       */
+/*==============================================*/
+*UpdateInfomationArea_Wait
+	//ImageAlphaSet 0
+	pos 0,0 : celput InfomationArea
+	// 音量表示
+	//pos 50,25 : celput PlayStateIcon,3
+	//color 0,0,100 : ChangeFontSize 20
+	//pos 80,28 : print ""+getMasterVolumePercent(masterVolume)+"%"
+	// 自動再生有無表示
+	//color 0,0,100 : ChangeFontSize 20
+	//pos 50,60: print "CD挿入後に自動再生 : "
+	//pos 250,60
+	//if(settingData(1)=1){
+	//	print "する"
+	//}else{
+	//	print "しない"
+	//}
+	//ImageAlphaReset
+	return
+
+/*==============================================*/
+/* UpdateInfomationArea_PlayMenu                */
+/*----------------------------------------------*/
+/* CD認識後のInfomationAreaを更新する           */
+/* これが【メイン】となる                       */
+/*==============================================*/
+*UpdateInfomationArea_PlayMenu
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+	// アイコンによる再生状態表示
+	ImageAlphaSet 0
+	pos 15,61 : celput PlayStateIcon,play
+	// アイコンによる再生モード表示
+	ChangeFontSize 20
+	if(playMode = PM_Normal){
+		pos 10,10:celput PlayModeIcon,PM_Normal
+		color 0,0,100
+		pos 69,19:print "通常再生"
+	}else:if(playMode = PM_SongLoop){
+		pos 10,10:celput PlayModeIcon,PM_SongLoop
+		color 0,0,100
+		pos 69,19:print "１曲ループ"
+	}else:if(playMode = PM_AllLoop){
+		pos 10,10:celput PlayModeIcon,PM_AllLoop
+		color 0,0,100
+		pos 69,19:print "全曲ループ"
+	}else:if(playMode = PM_Shuffle){
+		pos 10,10:celput PlayModeIcon,PM_Shuffle
+		color 0,0,100
+		pos 69,19:print "シャッフル"
+	}
+	ImageAlphaSet 0
+	// 追加ループの残回数を表示
+	if(loopRimaining > 0){
+		//ChangeFontSize 22
+		//pos 44,4 : print "○"
+		pos 42,3 : celput AddLoopIcon
+		ChangeFontSize 16
+		color 0,0,100
+		pos 53,6 : print ""+loopRimaining
+		ChangeFontSize 20
+	}
+	ImageAlphaSet 0
+	// 音量の表示
+	if(settingData(5)=1){
+		pos 320,5 : celput PlayStateIcon,3
+		color 0,0,100
+		pos 350,8 : print ""+getMasterVolumePercent(masterVolume)+"%"
+	}
+	
+	ImageAlphaReset
+	// アイコンによる再生中トラックの設定状態表示
+	pos 315,34
+	if(trackNP(playTrack-1)=1){
+		celput TrackSetting,2
+	}else:if(trackFV(playTrack-1)=1){
+		celput TrackSetting,1
+	}
+	// アイコンによる再生中トラックのココ○○設定状態表示
+	if(trackSP(playTrack-1)!=0){
+		pos 343,34 : celput TrackKokoset,2
+	}
+	if(trackEP(playTrack-1)!=0){
+		pos 343,46 : celput TrackKokoset,1
+	}	
+	// テキストによるトラック情報表示
+	color 0,0,100
+	if(play=0){
+		ChangeFontSize 20
+		pos 50,65 : print "全 "+allTrack+" ﾄﾗｯｸ"
+	}else{
+		ChangeFontSize 20
+		pos 50,65 : print "Track:"
+		ChangeFontSize 25
+		pos 110,60 : print playTrack
+	}
+	// テキストによる再生時間情報表示
+	ChangeFontSize 55 : pos 170,35
+	if(play=0){
+		// 停止状態
+		print " 0:00"
+	}else:if(play=2){
+		// 一時停止状態
+		ms=pausePosition@
+		if(ms>59900){
+			print SecondToTime(ms)
+		}else{
+			print " "+SecondToTime(ms)
+		}
+	}else:if(play=1){
+		// 再生状態
+		ms=GetNowPosition()
+		if(ms>59900){
+			print SecondToTime(ms)
+		}else{
+			print " "+SecondToTime(ms)
+		}
+	}
+	ChangeFontSize 25 : pos 305,60
+	if(play=0){
+		print "/ --:--"
+	}else{
+		ms=GetTrackLength(playTrack)
+		if(ms>59900){
+			print "/ "+SecondToTime(ms)
+		}else{
+			print "/  "+SecondToTime(ms)
+		}
+	}
+	// 描画処理によるシークバーの表示
+	color 121,171,111
+	boxf 0,88,sizeX,95
+	// ココマデ領域の描画
+	color 250,170,170
+	boxf 0,89,sizeX,94
+	// 再生区間の描画
+	color 211,227,208
+	if(trackEP(playTrack-1)!=0){
+		boxf 0,89,double(sizeX)/double(GetTrackLength(playTrack))*trackEP(playTrack-1),94
+	}else{
+		boxf 0,89,sizeX,94
+	}
+	// 再生済み領域の描画
+	if(double(GetTrackLength(playTrack))*GetNowPosition()!=0){	// ゼロ除算エラー回避
+		if(play=1){
+			color 40,80,40
+			boxf 0,89,double(sizeX)/double(GetTrackLength(playTrack))*GetNowPosition(),94
+		}else:if(play=2){
+			color 40,80,40
+			boxf 0,89,double(sizeX)/double(GetTrackLength(playTrack))*pausePosition,94
+		}
+	}
+	// ココカラ領域の描画
+	color 250,100,100
+	if(trackSP(playTrack-1)!=0){
+		boxf 0,89,double(sizeX)/double(GetTrackLength(playTrack))*trackSP(playTrack-1),94
+	}
+	// シークバーの操作
+	if(MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=89 & MousePosGet("y")<=94){
+		// マウスポインタの位置が分かりやすいように描画する
+		color 255,0,0
+		boxf MousePosGet("x")-1,89,MousePosGet("x")+1,94
+		ImageAlphaSet 0
+		pos MousePosGet("x")-33,51 : celput SeekTimeArea
+		ImageAlphaReset
+		// シーク先時間の表示
+		if(GetTrackLength(playTrack)!=0){		// ゼロ除算エラー回避
+			ms = double(MousePosGet("x"))/double(double(sizeX)/double(GetTrackLength(playTrack)))	// シーク位置の算出
+		}else{
+			ms = 0
+		}
+		ChangeFontSize 23 : color 200,50,50
+		if(ms>59900){
+			pos MousePosGet("x")-27,54 : print SecondToTime(ms)
+		}else{
+			pos MousePosGet("x")-30,54 : print " "+SecondToTime(ms)
+		}
+		// 操作案内を描画する
+		oparationNumber = ON_SeekBar
+		gosub *DrawOperationInfomation
+		// クリック操作時の処理
+		if(click_l=1 & play=1){
+			// 算出したシーク位置を利用してシークを行う
+			SeekCD(ms)
+		}else:if(click_r){
+			// ココマデ･ココカラ設定の選択肢を表示する
+			kokoSetTrack=playTrack
+			kokoSetTime=ms
+			kokoFromScreen = SM_PlayMenu
+			screenMode = SM_KokoSetting
+		}
+	}
+	return
+
+/*==============================================*/
+/* UpdatInfomationArea_DeleteTrackSetting       */
+/*----------------------------------------------*/
+/* ﾄﾗｯｸ設定消去時の選択をInfomationAreaに表示   */
+/* 「はい」を押すと消去を実行                   */
+/* 「いいえ」を押すとscreenModeをSM_PlayMenuに  */
+/*==============================================*/
+*UpdateInfomationArea_DeleteTrackSetting
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+	// 問いの文章を表示
+	ChangeFontSize 17: color 200,50,50
+	pos 10,5 : print "再生禁止曲などのトラック設定を全て消去します。"
+	pos 135,30 : print "よろしいですか？"
+	// 選択ボタンを表示
+	pos 90,60 : celput ButtonLarge,1
+	pos 220,60 : celput ButtonLarge,1
+	ChangeFontSize 17 : color 0,0,0
+	pos 90+28,63 : print "はい"
+	pos 220+20,63 : print "いいえ"
+	ImageAlphaSet 1
+	if(MousePosGet("x")>=90 & MousePosGet("x")<=180 & MousePosGet("y")>=60 & MousePosGet("y")<=85){
+		pos 90,60 : celput ButtonLarge,0
+		if(click_l=1){
+			// 消去実行の処理を書く
+			// トラック情報を記録する配列の初期化
+			ResetTrackArray trackNP,permissionTrack
+			ResetTrackArray trackFV,permissionTrack
+			ResetTrackArray trackSP,permissionTrack
+			ResetTrackArray trackEP,permissionTrack
+			// シャッフル再生情報を再設定するための処理
+			favoriteTrack = TrackSettingCount(TrackFV,allTrack)	// お気に入り曲の設定数を再設定する
+			PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+			TrackListArraySet		// トラック一覧配列の構築
+			ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+			// 自動保存と画面モードの切替
+			SaveAuto		// オートセーブ
+			screenMode = SM_PlayMenu
+		}
+	}else:if(MousePosGet("x")>=220 & MousePosGet("x")<=310 & MousePosGet("y")>=60 & MousePosGet("y")<=85){
+		pos 220,60 : celput ButtonLarge,0
+		if(click_l=1){
+			screenMode = SM_PlayMenu
+		}
+	}
+	ImageAlphaReset
+	return
+
+/*==============================================*/
+/* UpdatInfomationArea_KokoSetting              */
+/*----------------------------------------------*/
+/* ココ●●設定の選択をInfomationAreaに表示     */
+/* 「ココカラ」を押すとココカラを設定           */
+/* 「ココマデ」を押すとココマデを設定           */
+/* 「キャンセル」を押すとscreenModeを戻す       */
+/*==============================================*/
+*UpdateInfomationArea_KokoSetting
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+	// 問いの文章を表示
+	ChangeFontSize 18: color 0,0,0
+	pos 40,5 : print "次の再生位置に何を設定しますか？"
+	ChangeFontSize 20
+	pos 105,30 : print "『Track "+kokoSetTrack+"    "+SecondToTime(kokoSetTime)+"』"
+	// 選択ボタンを表示
+	pos 30,60 : celput ButtonLarge,1
+	pos 155,60 : celput ButtonLarge,1
+	pos 280,60 : celput ButtonLarge,1
+	ChangeFontSize 17 : color 0,0,0
+	color 180,0,0
+	if(trackSP(kokoSetTrack-1)!=0 & trackSP(kokoSetTrack-1)>=kokoSetTime){
+		pos 40,63 : print "ｺｺｶﾗ削除"
+	}else{
+		pos 40,63 : print "ココカラ"
+	}
+	if(trackEP(kokoSetTrack-1)!=0 & trackEP(kokoSetTrack-1)<=kokoSetTime){
+		pos 165,63 : print "ｺｺﾏﾃ削除"
+	}else{
+		pos 165,63 : print "ココマデ"
+	}
+	color 0,0,0
+	pos 282,63 : print "キャンセル"
+	ImageAlphaSet 1
+	if(MousePosGet("x")>=30 & MousePosGet("x")<=120 & MousePosGet("y")>=60 & MousePosGet("y")<=85){
+		pos 30,60 : celput ButtonLarge,0
+		if(click_l=1){
+			// ココカラ設定時の処理を書く
+			// 元々設定されている時間より前に設定する場合は「設定削除」とする
+			if(trackSP(kokoSetTrack-1)!=0 & trackSP(kokoSetTrack-1)>=kokoSetTime){
+				trackSP(kokoSetTrack-1)=int(0)
+			}else{
+				trackSP(kokoSetTrack-1)=int(kokoSetTime)
+			}
+			screenMode = kokoFromScreen
+			SaveAuto		// オートセーブ
+		}
+	}else:if(MousePosGet("x")>=155 & MousePosGet("x")<=245 & MousePosGet("y")>=60 & MousePosGet("y")<=85){
+		pos 155,60 : celput ButtonLarge,0
+		if(click_l=1){
+			// ココマデ設定時の処理を書く
+			// 元々設定されている時間より後に設定する場合は「設定削除」とする
+			if(trackEP(kokoSetTrack-1)!=0 & trackEP(kokoSetTrack-1)<=kokoSetTime){
+				trackEP(kokoSetTrack-1)=int(0)
+			}else{
+				trackEP(kokoSetTrack-1)=int(kokoSetTime)
+			}
+			screenMode = kokoFromScreen
+			SaveAuto		// オートセーブ
+		}
+	}else:if(MousePosGet("x")>=280 & MousePosGet("x")<=370 & MousePosGet("y")>=60 & MousePosGet("y")<=85){
+		pos 280,60 : celput ButtonLarge,0
+		if(click_l=1){
+			// キャンセル
+			screenMode = kokoFromScreen
+		}
+	}
+	ImageAlphaReset
+	return
+
+/*==============================================*/
+/* UpdatInfomationArea_SettingDataSave          */
+/*----------------------------------------------*/
+/* TrackAreaも使用してセーブの保存読出しを行う  */
+/* 項目を選択することで保存･読出しが可能        */
+/*==============================================*/
+*UpdateInfomationArea_TrackDataSave
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+	// 問いの文章を表示
+	ChangeFontSize 16: color 250,50,50
+	if(modeSaveLoad=0){
+		// 読み込みの場合
+		pos 55,0 : print "読み出す設定の名前を選択してください"
+	}else{
+		// 書き込みの場合
+		pos 20,0 : print "名前を入力して保存先の番号を選択してください"
+	}
+	if(titleLoadFlag=0){
+		LoadSaveTitle
+		titleLoadFlag=1
+	}
+	for i,0,5,1
+		if(MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=20+(20*i)-1 & MousePosGet("y")<=20+(20*i)+16+1){
+			color 0,0,100 : boxf 0,20+(20*i)-1,sizeX,20+(20*i)+16+1
+			color 255,255,255
+			pos 5,20+(20*i):print ""+(i+1+savePageNumber*5)+"."+saveTitleList(i+savePageNumber*5)
+			if(click_l=1){
+				if(modeSaveLoad=0){
+					// データ読み込み処理
+					RestoreSaveData(i+savePageNumber*5)	// 読み込み実行
+					modeEnd = 1							// 読み込みモードを自動終了させる
+					SaveAuto							// オートセーブ
+				}else{
+					// データ書き込み処理
+					SaveTrackData(i+savePageNumber*5)	// 書き込み実行
+					titleLoadFlag = 0					// タイトル一覧の取得フラグをクリア、再取得させる
+					modeSaveLoad = 0					// 保存読み出しフラグを『読み出し』にする
+					inputBoxFlag = 0					// 新テキストボックスを生成・再配置させるための準備
+					clrobj								// 現テキストボックスを消す
+				}
+			}
+			if(click_r=1){
+				if(modeSaveLoad=0){
+				}else{
+					saveDataTitle = saveTitleList(i+savePageNumber*5)
+					inputBoxFlag = 0					// 新テキストボックスを生成・再配置させるための準備
+					clrobj								// 現テキストボックスを消す
+				}
+			}
+		}else{
+			color 0,0,100
+			pos 5,20+(20*i):print ""+(i+1+savePageNumber*5)+"."+saveTitleList(i+savePageNumber*5)
+		}
+	next
+	return
+
+/*==============================================*/
+/* UpdatInfomationArea_SystemSetting            */
+/*----------------------------------------------*/
+/* ソフトウェアの設定画面を描画更新する         */
+/*==============================================*/
+*UpdateInfomationArea_SystemSetting
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+	// 問いの文章を表示
+	ChangeFontSize 16: color 250,50,50
+	pos 120,0 : print "ソフトウェアの設定"
+	if(settingPageNumber=0){
+		for i,0,5,1
+			if(settingData(i)=0){
+				settingTitle = "× : "
+			}else{
+				settingTitle = "○ : "
+			}
+			settingTitle += settingTitleList(i)
+			if(MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=20+(20*i)-1 & MousePosGet("y")<=20+(20*i)+16+1){
+				color 0,0,100 : boxf 0,20+(20*i)-1,sizeX,20+(20*i)+16+1
+				color 255,255,255
+				pos 5,20+(20*i):print settingTitle
+				if(click_l=1){
+					settingData(i) = settingData(i) xor 1
+				}
+				if(click_r=1){
+					// 設定詳細説明画面に切り替え
+				}
+			}else{
+				color 0,0,100
+				pos 5,20+(20*i):print settingTitle
+			}
+		next
+	}else:if(settingPageNumber=1){
+		for i,0,2,1
+		//i=0
+			if(settingData(i+5)=0){
+				settingTitle = "× : "
+			}else{
+				settingTitle = "○ : "
+			}
+			settingTitle += settingTitleList(i+5)
+			if(MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=20+(20*i)-1 & MousePosGet("y")<=20+(20*i)+16+1){
+				color 0,0,100 : boxf 0,20+(20*i)-1,sizeX,20+(20*i)+16+1
+				color 255,255,255
+				pos 5,20+(20*i):print settingTitle
+				if(click_l=1){
+					settingData(i+5) = settingData(i+5) xor 1
+				}
+				if(click_r=1){
+					// 設定詳細説明画面に切り替え
+				}
+			}else{
+				color 0,0,100
+				pos 5,20+(20*i):print settingTitle
+			}
+		next
+	}
+	return
+
+/*==============================================*/
+/* UpdateInfomationArea_TrackInfomation         */
+/*----------------------------------------------*/
+/* トラックボタン左ｸﾘｯｸ長押し時                 */
+/* トラック情報画面の描画更新を行う             */
+/*==============================================*/
+*UpdateInfomationArea_TrackInfomation
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+
+	// テキストによるタイトル表示
+	color 200,50,50
+	ChangeFontSize 18
+	pos 0,5 : print "♪トラック情報"
+
+	// 再生禁止,お気に入り曲設定の情報表示
+	color 180,180,210
+	if(trackNP(lookInfoTrack-1)=1){
+		pos 10,32 : celput TrackSetting,2
+	}else{
+		//boxf 10,32,10+28,32+23
+		pos 10,32 : celput TrackSetting,4
+	}
+	if(trackFV(lookInfoTrack-1)=1){
+		pos 10,58 : celput TrackSetting,1
+	}else{
+		//boxf 10,58,10+28,58+23
+		pos 10,58 : celput TrackSetting,3
+	}
+	
+	// テキストによる情報表示
+	color 0,0,100
+	ChangeFontSize 20
+	ms=GetTrackLength(lookInfoTrack)
+	pos 60,35 : print "トラック : "+lookInfoTrack
+	pos 60,60 : print "再生時間 : "+SecondToTime(ms)
+	
+	// ココカラ,ココマデの情報表示
+	pos 240,35+4 : celput TrackKokoset,2
+	pos 240,60+4 : celput TrackKokoset,1
+	if(trackSP(lookInfoTrack-1) = 0){
+		pos 295,35 : print "未設定"
+	}else{
+		ms = trackSP(lookInfoTrack-1)
+		pos 295,35 : print SecondToTime(ms)
+	}
+	if(trackEP(lookInfoTrack-1) = 0){
+		pos 295,60 : print "未設定"
+	}else{
+		ms = trackEP(lookInfoTrack-1)
+		pos 295,60 : print SecondToTime(ms)
+	}
+	
+	// 再生禁止曲設定のON/OFF操作
+	ImageAlphaSet 1
+	if(MousePosGet("x")>=10 & MousePosGet("x")<=38 & MousePosGet("y")>=32 & MousePosGet("y")<=55){
+		pos 10,32 : celput TrackSetting,0
+		// 操作案内を描画する
+		oparationNumber = ON_NPButtonTrackInfo
+		gosub *DrawOperationInfomation
+		// 再生禁止曲を切り替える
+		if(click_l=1){
+			// 再生禁止曲の設定
+			SetTrackNP lookInfoTrack-1
+			// 再生禁止曲の設定数を数える
+			nonPlayTrack = TrackSettingCount(trackNP,allTrack)
+			if(nonPlayTrack = allTrack){
+				// 全ての曲が再生禁止曲ならさっきの設定を無効にする
+				trackNP(lookInfoTrack-1)=0
+				nonPlayTrack--
+			}
+			SaveAuto		// オートセーブ
+		}
+	}
+
+	// お気に入り曲設定のON/OFF操作
+	ImageAlphaSet 1
+	if(MousePosGet("x")>=10 & MousePosGet("x")<=38 & MousePosGet("y")>=58 & MousePosGet("y")<=82){
+		pos 10,58 : celput TrackSetting,0
+		// 操作案内を描画する
+		oparationNumber = ON_FVButtonTrackInfo
+		gosub *DrawOperationInfomation
+		// お気に入り曲を切り替える
+		if(click_l=1){
+			// お気に入り曲の設定
+			SetTrackFV lookInfoTrack-1
+			// お気に入り曲の設定数を数える
+			favoriteTrack = TrackSettingCount(TrackFV,allTrack)
+			PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+			TrackListArraySet		// トラック一覧配列の構築
+			ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+			SaveAuto		// オートセーブ
+		}
+	}
+	ImageAlphaSet 0
+	// 閉じるボタン
+	// モード終了
+	if(MousePosGet("x")>=365 & MousePosGet("x")<=387 & MousePosGet("y")>=5 & MousePosGet("y")<=27){
+		pos 365,5 : celput PageIcon,5
+		if(click_l=1){
+			// 画面を再生メニューに設定
+			screenMode = SM_PlayMenu
+		}
+	}else{
+		pos 365,5 : celput PageIcon,2
+	}
+	ImageAlphaReset
+
+	// 描画処理によるシークバーの表示
+	color 121,171,111
+	boxf 0,88,sizeX,95
+	// ココマデ領域の描画
+	color 250,170,170
+	boxf 0,89,sizeX,94
+	// 再生区間の描画
+	color 211,227,208
+	if(trackEP(lookInfoTrack-1)!=0){
+		boxf 0,89,double(sizeX)/double(GetTrackLength(lookInfoTrack))*trackEP(lookInfoTrack-1),94
+	}else{
+		boxf 0,89,sizeX,94
+	}
+	// ココカラ領域の描画
+	color 250,100,100
+	if(trackSP(lookInfoTrack-1)!=0){
+		boxf 0,89,double(sizeX)/double(GetTrackLength(lookInfoTrack))*trackSP(lookInfoTrack-1),94
+	}
+	// シークバーの操作
+	if(MousePosGet("x")>=0 & MousePosGet("x")<=sizeX & MousePosGet("y")>=89 & MousePosGet("y")<=94){
+		// マウスポインタの位置が分かりやすいように描画する
+		color 255,0,0
+		boxf MousePosGet("x")-1,89,MousePosGet("x")+1,94
+		ImageAlphaSet 0
+		pos MousePosGet("x")-33,51 : celput SeekTimeArea
+		ImageAlphaReset
+		// シーク先時間の表示
+		if(GetTrackLength(lookInfoTrack)!=0){		// ゼロ除算エラー回避
+			ms = double(MousePosGet("x"))/double(double(sizeX)/double(GetTrackLength(lookInfoTrack)))	// シーク位置の算出
+		}else{
+			ms = 0
+		}
+		ChangeFontSize 23 : color 200,50,50
+		if(ms>59900){
+			pos MousePosGet("x")-27,54 : print SecondToTime(ms)
+		}else{
+			pos MousePosGet("x")-30,54 : print " "+SecondToTime(ms)
+		}
+		// 操作案内を描画する
+		oparationNumber = ON_SeekBarTrackInfo
+		gosub *DrawOperationInfomation
+		// クリック操作時の処理
+		if(click_l=1 || click_r=1){
+			// ココマデ･ココカラ設定の選択肢を表示する
+			kokoSetTrack=lookInfoTrack
+			kokoSetTime=ms
+			kokoFromScreen = SM_TrackInfomation
+			screenMode = SM_KokoSetting
+		}
+	}
+	return
+	
+/*==============================================*/
+/* UpdateInfomationArea_VolumeControl           */
+/*----------------------------------------------*/
+/* 音量ボタン押下後のインフォメーションエリア   */
+/* 音量操作用UIを表示し、音量設定処理を呼ぶ     */
+/*==============================================*/
+*UpdateInfomationArea_VolumeControl
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+
+	// テキストによるタイトル表示
+	color 200,50,50
+	ChangeFontSize 18
+	pos 0,5 : print "■音量操作"
+	
+	// テキストによる音量バーラベル表示
+	color 0,0,100
+	ChangeFontSize 20
+	pos 25,55 : print "マスタ"
+	ImageAlphaSet 0
+	pos 90,53 : celput PlayStateIcon,3
+	ImageAlphaReset
+	// マスタ音量をゲージに描画する
+	color 0,0,100
+	boxf 130-2,59-1,130+200+2,59+15+1
+	color 220,220,255
+	dbMasterVolumeGage = double(masterVolume)*dbMasterVolumeGageAtOne
+	boxf 130,59,130+int(dbMasterVolumeGage),59+15
+
+	// ボリューム予測値初期化
+	masterVolumeCorsorCurrent = -1
+	// マスタボリュームゲージ接触判定
+	if(MousePosGet("x")>=130 & MousePosGet("x")<=330 & MousePosGet("y")>=59 & MousePosGet("y")<=74){
+		// マウスポインタの位置が分かりやすいように描画する
+		color 255,0,0
+		boxf MousePosGet("x")-1,59,MousePosGet("x")+1,74
+		// カーソル位置の音量値を算出
+		masterVolumeCorsorCurrent = MousePosGet("x")-130
+		// 予測値の設定
+		masterVolumeCorsorCurrent = double(masterVolumeCorsorCurrent) / dbMasterVolumeGageAtOne
+		// クリック操作時の処理
+		if(click_l=1 || click_r=1){
+			if(int(masterVolumeCorsorCurrent)==0){
+				masterVolumeCorsorCurrent = 0
+			}
+			masterVolume = masterVolumeCorsorCurrent
+			setMasterVolume(masterVolume)
+			gosub *SaveVolumeData
+		}
+	}
+	
+	// マスタボリューム値を表示
+	if(masterVolumeCorsorCurrent<0){
+		// 通常表示
+		color 0,0,100
+		pos 345,55: print strf("%3d",""+getMasterVolumePercent(masterVolume))+"%"	// 3桁合わせフォーマット
+	}else{
+		// マウスカーソルがゲージに乗っている場合、リアルタイム表示
+		color 200,50,50
+		pos 345,55 : print strf("%3d",""+getMasterVolumePercent(masterVolumeCorsorCurrent))+"%"	// 3桁合わせフォーマット
+	}
+	// トラックボリューム値を表示
+	//if(trackVolumePercent=0){
+	//	trackVolumeSign = "±"
+	//}else:if(trackVolumePercent>0){
+	//	trackVolumeSign = "+"
+	//}else{
+	//	trackVolumeSign = ""
+	//}
+	//if(trackVolumeCorsorCurrent<0){
+	//	// 通常表示
+	//	color 0,0,100
+	//	pos 345,65 : print trackVolumeSign+trackVolumePercent+"%"	// -50%～+50%の表示に変換
+	//}else{
+	//	// マウスカーソルがゲージに乗っている場合、リアルタイム表示
+	//	color 200,50,50
+	//	pos 345,65 : print trackVolumeSign+trackVolumePercent+"%"	// -50%～+50%の表示に変換
+	//}
+	
+	// 閉じるボタン
+	// モード終了
+	ImageAlphaSet 0
+	if(MousePosGet("x")>=365 & MousePosGet("x")<=387 & MousePosGet("y")>=5 & MousePosGet("y")<=27){
+		pos 365,5 : celput PageIcon,5
+		if(click_l=1){
+			// 画面を再生メニューに設定
+			screenMode = SM_PlayMenu
+		}
+	}else{
+		pos 365,5 : celput PageIcon,2
+	}
+	ImageAlphaReset
+	
+	return
+
+/*==============================================*/
+/* UpdateInfomationArea_VolumeControlCDWait     */
+/*----------------------------------------------*/
+/* 音量ボタン押下後のインフォメーションエリア   */
+/* 音量操作用UIを表示し、音量設定処理を呼ぶ     */
+/*==============================================*/
+*UpdateInfomationArea_VolumeControlCDWait
+	// InfomationAreaの背景更新
+	pos 0,0 : celput InfomationArea
+
+	// テキストによるタイトル表示
+	color 200,50,50
+	ChangeFontSize 18
+	pos 0,5 : print "■音量操作"
+	
+	// テキストによる音量バーラベル表示
+	color 0,0,100
+	ChangeFontSize 20
+	pos 25,55 : print "マスタ"
+	ImageAlphaSet 0
+	pos 90,53 : celput PlayStateIcon,3
+	ImageAlphaReset
+	// マスタ音量をゲージに描画する
+	color 0,0,100
+	boxf 130-2,59-1,130+200+2,59+15+1
+	color 220,220,255
+	dbMasterVolumeGage = double(masterVolume)*dbMasterVolumeGageAtOne
+	boxf 130,59,130+int(dbMasterVolumeGage),59+15
+	
+	// ボリューム予測値初期化
+	masterVolumeCorsorCurrent = -1
+	
+	// マスタボリュームゲージ接触判定
+	if(MousePosGet("x")>=130 & MousePosGet("x")<=330 & MousePosGet("y")>=59 & MousePosGet("y")<=74){
+		// マウスポインタの位置が分かりやすいように描画する
+		color 255,0,0
+		boxf MousePosGet("x")-1,59,MousePosGet("x")+1,74
+		// カーソル位置の音量値を算出
+		masterVolumeCorsorCurrent = MousePosGet("x")-130
+		// 予測値の設定
+		masterVolumeCorsorCurrent = double(masterVolumeCorsorCurrent) / dbMasterVolumeGageAtOne
+		// クリック操作時の処理
+		if(click_l=1 || click_r=1){
+			masterVolume = masterVolumeCorsorCurrent
+			setMasterVolume(masterVolume)
+		}
+	}
+	
+	// マスタボリューム値を表示
+	if(masterVolumeCorsorCurrent<0){
+		// 通常表示
+		color 0,0,100
+		pos 345,55: print strf("%3d",""+getMasterVolumePercent(masterVolume))+"%"	// 3桁合わせフォーマット
+	}else{
+		// マウスカーソルがゲージに乗っている場合、リアルタイム表示
+		color 200,50,50
+		pos 345,55 : print strf("%3d",""+getMasterVolumePercent(masterVolumeCorsorCurrent))+"%"	// 3桁合わせフォーマット
+	}
+	
+	// 閉じるボタン
+	// モード終了
+	ImageAlphaSet 0
+	if(MousePosGet("x")>=365 & MousePosGet("x")<=387 & MousePosGet("y")>=5 & MousePosGet("y")<=27){
+		pos 365,5 : celput PageIcon,5
+		if(click_l=1){
+			// 画面を再生メニューに設定
+			screenMode = SM_CDInsertWait
+		}
+	}else{
+		pos 365,5 : celput PageIcon,2
+	}
+	ImageAlphaReset
+	
+	return
+
+/*==============================================*/
+/* UpdateTrackArea_Wait                         */
+/*----------------------------------------------*/
+/* CD挿入待機時のTrackAreaを更新する            */
+/* CD挿入時には別のサブルーチンが呼ばれる       */
+/*==============================================*/
+*UpdateTrackArea_Wait
+	pos 0,96 : celput TrackArea
+	color 0,0,0
+	//font "HGSｺﾞｼｯｸE",18
+	ChangeFontSize 18
+	pos 90,100 : print "音楽CDを挿入してください"
+	return
+	
+/*==============================================*/
+/* UpdateTrackArea_PlayMenu                     */
+/*----------------------------------------------*/
+/* CD挿入後のTrackAreaを更新する                */
+/* これが【メイン】となる                       */
+/*==============================================*/
+*UpdateTrackArea_PlayMenu
+	pos 0,96 : celput TrackArea
+	celputX = 0
+	cnt1 = 0
+	repeat allTrack
+		// トラックボタンの表示
+		pos 30+(cnt1*25)+trackAreaMoveX,98
+		if(playTrack=cnt1+1){
+			celput tbutton,2		// 再生中のボタン
+		}else:if(trackNP(cnt1)=1){
+			celput tbutton,3		// 再生禁止曲のボタン
+		}else:if(trackFV(cnt1)=1){
+			celput tbutton,4		// お気に入り曲のボタン
+		}else{
+			celput tbutton,1		// 無設定の曲のボタン
+		}
+		// トラック番号の表示
+		color 0,0,0 : ChangeFontSize 18
+		if(cnt1>8){
+			// トラック番号10以上
+			pos 30+(cnt1*25)+trackAreaMoveX+2,98+2
+			print cnt1+1
+		}else{
+			// トラック番号1桁
+			pos 30+(cnt1*25)+trackAreaMoveX+8,98+2
+			print cnt1+1
+		}
+		// トラックボタンのマウスオーバー判定
+		if(MousePosGet("x")>=30+(cnt1*25)+trackAreaMoveX & MousePosGet("x")<=30+(cnt1*25)+trackAreaMoveX+25 & MousePosGet("y")>=98 & MousePosGet("y")<=118){
+			// 移動アイコン選択中でなければ操作判定に入る
+			if(MousePosGet("x")>30 & MousePosGet("x")<sizeX-30){
+				// 操作案内を表示する
+				if(trackNP(cnt1)=0 && trackFV(cnt1)=0){
+					oparationNumber = ON_TrackButtonNormal
+				}else:if(trackNP(cnt1)=1 && trackFV(cnt1)=0){
+					oparationNumber = ON_TrackButtonNPTrack
+				}else:if(trackNP(cnt1)=0 && trackFV(cnt1)=1){
+					oparationNumber = ON_TrackButtonFVTrack
+				}else:if(trackNP(cnt1)=1 && trackFV(cnt1)=1){
+					oparationNumber = ON_TrackButtonNPFVTrack
+				}
+				gosub *DrawOperationInfomation
+				// アイコンの上にマウスカーソルがあれば色を白くする
+				ImageAlphaSet 1
+				pos 30+(cnt1*25)+trackAreaMoveX,98 : celput tbutton,0
+				gmode 1,0,0,256
+				ImageAlphaReset
+				// 左クリックでCD再生、右クリックで再生禁止設定、マウスクリックでお気に入り設定
+				if(click_l=1){
+					if(play=2 & playTrack!=cnt+1){		// 一時停止状態のまま他トラックへ行った場合
+						play = 1						// 通常再生に変更
+						pausePosition = 0				// 一時停止している場所を初期化
+					}
+					PlayCD cnt1+1
+					loopRimaining@ = 0					// 追加ループの残回数を消す
+					screenMode = SM_PlayMenu			// 画面モードを再生メニュー画面に設定
+				}else:if(click_r=1){
+					// 再生禁止曲の設定
+					SetTrackNP cnt1
+					// 再生禁止曲の設定数を数える
+					nonPlayTrack = TrackSettingCount(trackNP,allTrack)
+					if(nonPlayTrack = allTrack){
+						// 全ての曲が再生禁止曲ならさっきの設定を無効にする
+						trackNP(cnt1)=0
+						nonPlayTrack--
+					}
+					SaveAuto		// オートセーブ
+				}else:if(click_m=1 || click_r = 2){
+					// お気に入り曲の設定
+					SetTrackFV cnt1
+					// シャッフル再生情報を再設定するための処理
+					favoriteTrack = TrackSettingCount(TrackFV,allTrack)	// お気に入り曲の設定数を再設定する
+					PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+					TrackListArraySet		// トラック一覧配列の構築
+					ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+					SaveAuto		// オートセーブ
+				}else:if(click_l = 2){
+					// トラック情報の表示
+					screenMode = SM_TrackInfomation		// 画面番号の設定
+					lookInfoTrack = cnt1+1				// 情報を見るトラック番号を設定
+				}
+			}
+		}
+		celputX+=25
+		cnt1++
+	loop
+
+	// マウスホイール回転でトラックボタンを移動する
+	if(allTrack>13){
+		move=(mousewheel/15)*trackAreaScroll
+		trackAreaMoveX+=move
+		// 端のボタンが特定の位置まで来たら適切な座標を設定し続ける
+		if(move>0 & trackAreaMoveX>=0){
+			trackAreaMoveX = 0
+		}else:if(move<0 & trackAreaMoveX+(allTrack*25)<=sizeX-30){
+			trackAreaMoveX = -(allTrack*25)+sizeX-60
+		}
+	}
+	
+	// トラックボタン移動フラグでの移動
+	if(trackMoveFlag!=0){
+		trackAreaMoveX+=trackMoveFlag*trackAreaMoveSpeed
+		trackMoveCount++
+		// 端のボタンが特定の座標に到達したら移動を中断する
+		if(trackMoveFlag=-1){
+			if(trackAreaMoveX+(allTrack*25)<=sizeX-30){
+				trackAreaMoveX = -(allTrack*25)+sizeX-60	// ボタン位置が適切な位置に来るように調整する
+				trackMoveFlag = 0
+				trackMoveCount = 0
+			}
+		}else:if(trackMoveFlag=1){
+			if(trackAreaMoveX>=0){
+				trackAreaMoveX = 0	// ボタン位置が適切な位置に来るように調整する
+				trackMoveFlag = 0
+				trackMoveCount = 0
+			}
+		}
+		// 設定されている量を移動したら移動を終了する
+		if(trackMoveCount = trackAreaMoveOnce){
+			trackMoveFlag = 0
+			trackMoveCount = 0
+		}
+	}
+	
+	// トラックエリア移動アイコンの表示
+	// 左移動アイコン
+	// 一番右端のトラックボタンの右隅が見切れていたら有効にする
+	if(trackAreaMoveX+(allTrack*25+25)>sizeX-30 & allTrack>13){
+		if(MousePosGet("x")>=0 & MousePosGet("x")<=30 & MousePosGet("y")>=96 & MousePosGet("y")<=120){
+			pos 0,96: celput TrackAreaMoveIcon,3
+			// 操作案内を描画する
+			oparationNumber = ON_TrackAreaMoveButton
+			gosub *DrawOperationInfomation
+			// 左クリックで移動フラグを右方向にON
+			if(click_l=1){
+				trackMoveFlag=-1
+			}
+		}else{
+			pos 0,96: celput TrackAreaMoveIcon,1
+		}
+	}else{
+		pos 0,96: celput TrackAreaMoveIcon,0
+	}
+	// 右移動アイコン
+	// トラックエリアが移動している場合は有効にする
+	if(trackAreaMoveX<0){
+		if(MousePosGet("x")>=sizeX-30 & MousePosGet("x")<=sizeX & MousePosGet("y")>=96 & MousePosGet("y")<=120){
+			pos sizeX-30,96 : celput TrackAreaMoveIcon,4
+			// 操作案内を描画する
+			oparationNumber = ON_TrackAreaMoveButton
+			gosub *DrawOperationInfomation
+			// 左クリックで移動フラグを左方向にON
+			if(click_l=1){
+				trackMoveFlag=1
+			}
+		}else{
+			pos sizeX-30,96 : celput TrackAreaMoveIcon,2
+		}
+	}else{
+		pos sizeX-30,96 : celput TrackAreaMoveIcon,0
+	}
+	return
+	
+/*==============================================*/
+/* UpdateControlArea_Wait                       */
+/*----------------------------------------------*/
+/* CD挿入待機時のTrackAreaを更新する            */
+/* CD挿入時には別のサブルーチンが呼ばれる       */
+/*==============================================*/
+*UpdateControlArea_Wait
+/*	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 設定に関する操作ボタン
+	pos 10,124 : celput ButtonNormal,1			// 取り出しボタン
+	pos 17,129 : celput ControlMenuIcon,0
+	// ---------- 以下よりボタンの接触判定
+	ImageAlphaSet 1
+	// 『取り出しボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=10 & MousePosGet("x")<=40 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 10,124 : celput ButtonNormal,0
+		if(click_l=1){
+			// ディスクを取り出す
+			mci "set myid door open"	 	// CDの取り出し（自動）
+			if(play!=0){
+				StopCD							// 再生を停止
+			}
+			gosub *ResetSystemStatus		// 変数を全てリセット
+			screenMode = SM_CDInsertWait	// スクリーンモードを切り替え
+		}
+	}
+	ImageAlphaReset
+	return*/
+	
+	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 設定に関する操作ボタン
+	pos 10,124 : celput ButtonNormal,1			// 取り出しボタン
+	pos 17,129 : celput ControlMenuIcon,0
+	pos 42,124 : celput ButtonNormal,1			// 設定ボタン
+	pos 49,129 : celput ControlMenuIcon,3
+	pos 74,124 : celput ButtonNormal,1			// 音量操作ボタン
+	pos 81,129 : celput ControlMenuIcon,7
+	// ---------- 以下よりボタンの接触判定
+	ImageAlphaSet 1
+	// 『取り出しボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=10 & MousePosGet("x")<=40 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 10,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_EjectButton
+		gosub *DrawOperationInfomation
+		// 左クリック操作時の処理
+		if(click_l=1){
+			// ディスクを取り出す
+			mci "set myid door open"	 	// CDの取り出し（自動）
+			if(play!=0){
+				StopCD							// 再生を停止
+			}
+			gosub *ResetSystemStatus		// 変数を全てリセット
+			screenMode = SM_CDInsertWait	// スクリーンモードを切り替え
+		}
+	}
+	// 『設定ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=42 & MousePosGet("x")<=72 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 42,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_SettingButton
+		gosub *DrawOperationInfomation
+		// 左クリック操作時の処理
+		if(click_l=1){
+			// 画面モードを変えて設定メニューを出す
+			screenMode = SM_SystemSettingCDWait
+		}
+	}
+	// 『音量ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=74 & MousePosGet("x")<=104 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 74,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_VolumeButton
+		gosub *DrawOperationInfomation
+		// 左クリック操作時の処理
+		if(click_l=1){
+			screenMode = SM_VolumeControlCDWait
+		}
+	}
+	ImageAlphaReset
+	return
+	
+/*==============================================*/
+/* UpdateControlArea_PlayMenu                   */
+/*----------------------------------------------*/
+/* CD挿入後のControlAreaを更新する              */
+/* これが【メイン】となる                       */
+/*==============================================*/
+*UpdateControlArea_PlayMenu
+	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 設定に関する操作ボタン
+	pos 10,124 : celput ButtonNormal,1			// 取り出しボタン
+	pos 17,129 : celput ControlMenuIcon,0
+	pos 42,124 : celput ButtonNormal,1			// 保存ボタン
+	pos 49,129 : celput ControlMenuIcon,2
+	pos 74,124 : celput ButtonNormal,1			// 設定ボタン
+	pos 81,129 : celput ControlMenuIcon,3
+	pos 106,124 : celput ButtonNormal,1			// 設定消去ボタン
+	pos 113,129 : celput ControlMenuIcon,4
+	pos 138,124 : celput ButtonNormal,1			// 再生モードボタン
+	pos 145,129 : celput ControlMenuIcon,5
+	pos 170,124 : celput ButtonNormal,1			// 追加ループボタン
+	pos 177,129 : celput ControlMenuIcon,6
+	pos 202,124 : celput ButtonNormal,1			// 音量操作ボタン
+	pos 209,129 : celput ControlMenuIcon,7
+	
+	// 再生に関する操作ボタン
+	pos sizeX-130,126 : celput ButtonSmall,1	// 前トラック
+	pos sizeX-124,130 : celput PlayMenuIcon,3
+	pos sizeX-100,126 : celput ButtonSmall,1	// 停止
+	pos sizeX-94,130 : celput PlayMenuIcon,0
+	pos sizeX-70,126 : celput ButtonSmall,1		// 再生・一時停止
+	if(play!=1){
+		pos sizeX-64,130 : celput PlayMenuIcon,1
+	}else{
+		pos sizeX-64,130 : celput PlayMenuIcon,2
+	}
+	pos sizeX-40,126 : celput ButtonSmall,1		// 次トラック
+	pos sizeX-34,130 : celput PlayMenuIcon,4
+	// ---------- 以下よりボタンの接触判定
+	ImageAlphaSet 1
+	// 『取り出しボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=10 & MousePosGet("x")<=40 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 10,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_EjectButton
+		gosub *DrawOperationInfomation
+		// 左クリックでディスクを取り出す
+		if(click_l=1){
+			mci "set myid door open"	 	// CDの取り出し（自動）
+			if(play!=0){
+				StopCD							// 再生を停止
+			}
+			gosub *ResetSystemStatus		// 変数を全てリセット
+			screenMode = SM_CDInsertWait	// スクリーンモードを切り替え
+		}
+	}
+	// 『保存ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=42 & MousePosGet("x")<=72 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 42,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_FileButton
+		gosub *DrawOperationInfomation
+		// 画面モードを変えて保存メニューを出す	
+		if(click_l=1){
+			screenMode = SM_TrackDataSave
+		}
+	}
+	// 『設定ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=74 & MousePosGet("x")<=104 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 74,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_SettingButton
+		gosub *DrawOperationInfomation
+		// 画面モードを変えて設定メニューを出す
+		if(click_l=1){
+			screenMode = SM_SystemSetting
+		}
+	}
+	// 『設定消去ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=106 & MousePosGet("x")<=136 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 106,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_SettingClearButton
+		gosub *DrawOperationInfomation
+		// 画面モードを変えて設定消去メニューを出す
+		if(click_l=1){
+			screenMode = SM_DeleteTrackSetting
+		}
+	}
+	// 『再生モードボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=138 & MousePosGet("x")<=168 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 138,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_PlaymodeButton
+		gosub *DrawOperationInfomation
+		if(click_l=1){
+			// 再生モード切り替え
+			playMode++
+			if(playMode>PM_Shuffle){
+				playMode = PM_Normal
+			}
+			// シャッフル再生ならシャッフル再生リストの構築を行う
+			if(playMode = PM_shuffle){
+				PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+				TrackListArraySet		// トラック一覧配列の構築
+				ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+			}
+			SaveAuto		// オートセーブ
+		}
+	}
+	// 『追加ループボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=170 & MousePosGet("x")<=200 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 170,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_AddLoopButton
+		gosub *DrawOperationInfomation
+		// 左クリックで+1、右クリックで-1
+		if(click_l=1){
+			loopRimaining++
+			if(loopRimaining>9){
+				loopRimaining=9
+			}
+		}else:if(click_r=1){
+			loopRimaining--
+			if(loopRimaining<0){
+				loopRimaining = 0
+			}
+		}
+	}
+	// 『音量ボタン』のマウスオーバー判定
+	if(MousePosGet("x")>=202 & MousePosGet("x")<=232 & MousePosGet("y")>=124 & MousePosGet("y")<=149){
+		pos 202,124 : celput ButtonNormal,0
+		// 操作案内を描画する
+		oparationNumber = ON_VolumeButton
+		gosub *DrawOperationInfomation
+		// 音量操作画面モードに切り替える
+		if(click_l=1){
+			screenMode = SM_VolumeControl
+		}
+	}
+	// 『前トラック』のマウスオーバー判定
+	if(MousePosGet("x")>=sizeX-130 & MousePosGet("x")<=sizeX-101 & MousePosGet("y")>=126 & MousePosGet("y")<=146){
+		pos sizeX-130,126 : celput ButtonSmall,0
+		// 操作案内を描画する
+		oparationNumber = ON_PrevButton
+		gosub *DrawOperationInfomation
+		// 左クリックで前の曲へ(または曲を最初から)
+		if(click_l=1){
+			if(play=2){				// 一時停止状態のまま他トラックへ行った場合
+				play = 1			// 通常再生に変更
+				pausePosition = 0	// 一時停止している場所を初期化
+			}
+			ChangeTrack playTrack,allTrack,1,PlayMode
+		}
+	}
+	// 『停止』のマウスオーバー判定
+	if(MousePosGet("x")>=sizeX-100 & MousePosGet("x")<=sizeX-71 & MousePosGet("y")>=126 & MousePosGet("y")<=146){
+		pos sizeX-100,126 : celput ButtonSmall,0
+		// 操作案内を描画する
+		oparationNumber = ON_StopButton
+		gosub *DrawOperationInfomation
+		// 左クリックで停止
+		if(click_l=1){
+			StopCD
+		}
+	}
+	// 『再生・一時停止』のマウスオーバー判定
+	if(MousePosGet("x")>=sizeX-70 & MousePosGet("x")<=sizeX-41 & MousePosGet("y")>=126 & MousePosGet("y")<=146){
+		pos sizeX-70,126 : celput ButtonSmall,0
+		if(play=1){
+			// 操作案内を描画する
+			oparationNumber = ON_PauseButton
+			gosub *DrawOperationInfomation
+			// 左クリックで一時停止処理
+			if(click_l=1){
+				PauseCD
+			}
+		}else{
+			// 操作案内を描画する
+			oparationNumber = ON_PlayButton
+			gosub *DrawOperationInfomation
+			// 左クリックで再生処理
+			if(click_l=1){
+				PlayCD(playTrack)
+			}
+		}
+		//if(click_l=1){
+		//	// 『再生中の一時停止』と『その他状態の再生』で処理分岐
+		//	if(play=1){
+		//		// 一時停止処理をここに書く
+		//		PauseCD
+		//	}else{
+		//		// 再生処理をここに書く
+		//		PlayCD(playTrack)
+		//	}
+		//}
+	}
+	// 『次トラック』のマウスオーバー判定
+	if(MousePosGet("x")>=sizeX-40 & MousePosGet("x")<=sizeX-11 & MousePosGet("y")>=126 & MousePosGet("y")<=146){
+		pos sizeX-40,126 : celput ButtonSmall,0
+		// 操作案内を描画する
+		oparationNumber = ON_NextButton
+		gosub *DrawOperationInfomation
+		// 左クリックで次の曲へ
+		if(click_l=1){
+			if(play=2){				// 一時停止状態のまま他トラックへ行った場合
+				play = 1			// 通常再生に変更
+				pausePosition = 0	// 一時停止している場所を初期化
+			}
+			ChangeTrack playTrack,allTrack,2,PlayMode
+		}
+	}
+	ImageAlphaReset
+	return
+	
+/*==============================================*/
+/* UpdateControlArea_TrackDataSave              */
+/*----------------------------------------------*/
+/* トラックデータ保存･読出し時のControlArea     */
+/*==============================================*/
+*UpdateControlArea_TrackDataSave
+	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 再生に関する操作ボタン
+	// ページ上送り
+	if(MousePosGet("x")>=300 & MousePosGet("x")<=322 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 300,124 : celput PageIcon,3
+		if(click_l=1){
+			savePageNumber--
+			if(savePageNumber<0){
+				savePageNumber = maxPage
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 300,124 : celput PageIcon,0
+	}
+	// ページ下送り
+	if(MousePosGet("x")>=325 & MousePosGet("x")<=347 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 325,124 : celput PageIcon,4
+		if(click_l=1){
+			savePageNumber++
+			if(savePageNumber > maxPage){
+				savePageNumber = 0
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 325,124 : celput PageIcon,1
+	}
+	
+	// マウスホイールによるページ送り
+	if(mousewheel>0){
+		// 上送り
+		savePageNumber--
+		if(savePageNumber<0){
+			savePageNumber = maxPage
+		}
+	}else:if(mousewheel<0){
+		// 下送り
+		savePageNumber++
+		if(savePageNumber > maxPage){
+			savePageNumber = 0
+		}
+	}
+	// モード終了
+	if(MousePosGet("x")>=375 & MousePosGet("x")<=397 & MousePosGet("y")>=124 & MousePosGet("y")<=146 | modeEnd = 1){
+		pos 375,124 : celput PageIcon,5
+		if(click_l=1){
+			modeSaveLoad = 0		// 保存読み出しモードを元に戻す
+			inputBoxFlag = 0		// 入力ボックス表示フラグを元に戻す
+			clrobj					// 入力ボックスをクリア
+			saveDataTitle = ""		// 入力されていた保存名をクリア
+			modeEnd = 0				// 自動終了フラグをクリア
+			screenMode = SM_PlayMenu
+		}
+	}else{
+		pos 375,124 : celput PageIcon,2
+	}
+	if(modeSaveLoad=0){
+		pos 5,123 : celput ButtonLarge,1	// モード切替ボタン
+		// 保存モード切り替え
+		if(MousePosGet("x")>=5 & MousePosGet("x")<=95 & MousePosGet("y")>=123 & MousePosGet("y")<=148){
+			ImageAlphaSet 230
+			pos 5,123 : celput ButtonLarge,0
+			if(click_l=1){
+				// 保存モードにする
+				modeSaveLoad = 1
+			}
+		}
+	}else{
+		// 保存モードの場合
+		color 0,0,0
+		if(inputBoxFlag = 0){
+			pos 65,123 : input saveDataTitle,140,22		// 保存タイトル設定用の入力ボックス
+			inputBoxFlag=1								// フラグを1にして再設定されないようにする
+		}
+		pos 5,125 : print "保存名:"
+	}
+	ImageAlphaReset
+	color 0,0,0
+	ChangeFontSize 18
+	pos 235,126 : print "ページ"
+	if(modeSaveLoad=0){
+		// 読み込みモード時
+		ChangeFontSize 16
+		pos 10,126 : print "設定の保存"
+	}
+	return
+
+/*==============================================*/
+/* UpdateControlArea_SystemSetting              */
+/*----------------------------------------------*/
+/* システム設定画面のコントロールエリア         */
+/*==============================================*/
+*UpdateControlArea_SystemSetting
+	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 再生に関する操作ボタン
+	// ページ上送り
+	if(MousePosGet("x")>=300 & MousePosGet("x")<=322 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 300,124 : celput PageIcon,3
+		if(click_l=1){
+			settingPageNumber--
+			if(settingPageNumber<0){
+				settingPageNumber = 1
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 300,124 : celput PageIcon,0
+	}
+	// ページ下送り
+	if(MousePosGet("x")>=325 & MousePosGet("x")<=347 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 325,124 : celput PageIcon,4
+		if(click_l=1){
+			settingPageNumber++
+			if(settingPageNumber > 1){
+				settingPageNumber = 0
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 325,124 : celput PageIcon,1
+	}
+	
+	// マウスホイールによるページ送り
+	if(mousewheel>0){
+		// 上送り
+		settingPageNumber--
+		if(settingPageNumber<0){
+			settingPageNumber = 1
+		}
+	}else:if(mousewheel<0){
+		// 下送り
+		settingPageNumber++
+		if(settingPageNumber > 1){
+			settingPageNumber = 0
+		}
+	}
+	// 再生に関する操作ボタン
+	// モード終了
+	if(MousePosGet("x")>=375 & MousePosGet("x")<=397 & MousePosGet("y")>=124 & MousePosGet("y")<=146 | modeEnd = 1){
+		pos 375,124 : celput PageIcon,5
+		if(click_l=1){
+			screenMode = SM_PlayMenu
+		}
+	}else{
+		pos 375,124 : celput PageIcon,2
+	}
+	if(modeSaveLoad=0){
+		pos 5,123 : celput ButtonLarge,1	// 設定保存ボタン
+		if(MousePosGet("x")>=5 & MousePosGet("x")<=95 & MousePosGet("y")>=123 & MousePosGet("y")<=148){
+			ImageAlphaSet 230
+			pos 5,123 : celput ButtonLarge,0
+			if(click_l=1){
+				gosub *SaveSettingData
+				gosub *LoadSettingData
+				screenMode = SM_PlayMenu
+			}
+		}
+	}
+	ImageAlphaReset
+	color 0,0,0
+	ChangeFontSize 18
+	pos 235,126 : print "ページ"
+	color 0,0,0
+	ChangeFontSize 16
+	pos 10,126 : print "設定を保存"
+	return
+	
+/*==============================================*/
+/* UpdateControlArea_SystemSettingCDWait        */
+/*----------------------------------------------*/
+/* CD挿入待機中/システム設定画面のコントロール  */
+/*==============================================*/
+*UpdateControlArea_SystemSettingCDWait
+	pos 0,120 : celput ControlArea
+	ImageAlphaSet 0
+	// 再生に関する操作ボタン
+	// ページ上送り
+	if(MousePosGet("x")>=300 & MousePosGet("x")<=322 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 300,124 : celput PageIcon,3
+		if(click_l=1){
+			settingPageNumber--
+			if(settingPageNumber<0){
+				settingPageNumber = 1
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 300,124 : celput PageIcon,0
+	}
+	// ページ下送り
+	if(MousePosGet("x")>=325 & MousePosGet("x")<=347 & MousePosGet("y")>=124 & MousePosGet("y")<=146){
+		pos 325,124 : celput PageIcon,4
+		if(click_l=1){
+			settingPageNumber++
+			if(settingPageNumber > 1){
+				settingPageNumber = 0
+			}
+//			titleLoadFlag=0		// 表示する既存データ名の取得フラグをOFFにする
+		}
+	}else{
+		pos 325,124 : celput PageIcon,1
+	}
+	
+	// マウスホイールによるページ送り
+	if(mousewheel>0){
+		// 上送り
+		settingPageNumber--
+		if(settingPageNumber<0){
+			settingPageNumber = 1
+		}
+	}else:if(mousewheel<0){
+		// 下送り
+		settingPageNumber++
+		if(settingPageNumber > 1){
+			settingPageNumber = 0
+		}
+	}
+	// 再生に関する操作ボタン
+	// モード終了
+	if(MousePosGet("x")>=375 & MousePosGet("x")<=397 & MousePosGet("y")>=124 & MousePosGet("y")<=146 | modeEnd = 1){
+		pos 375,124 : celput PageIcon,5
+		if(click_l=1){
+			screenMode = SM_CDInsertWait
+		}
+	}else{
+		pos 375,124 : celput PageIcon,2
+	}
+	if(modeSaveLoad=0){
+		pos 5,123 : celput ButtonLarge,1	// 設定保存ボタン
+		if(MousePosGet("x")>=5 & MousePosGet("x")<=95 & MousePosGet("y")>=123 & MousePosGet("y")<=148){
+			ImageAlphaSet 230
+			pos 5,123 : celput ButtonLarge,0
+			if(click_l=1){
+				gosub *SaveSettingData
+				gosub *LoadSettingData
+				screenMode = SM_CDInsertWait
+			}
+		}
+	}
+	ImageAlphaReset
+	color 0,0,0
+	ChangeFontSize 18
+	pos 235,126 : print "ページ"
+	color 0,0,0
+	ChangeFontSize 16
+	pos 10,126 : print "設定を保存"
+	return
+
+	
+/*==============================================*/
+/* KeyGet                                       */
+/*----------------------------------------------*/
+/* ボタン押下の有無を取得する                   */
+/*==============================================*/
+*KeyGet
+	getkey get_click_l,1
+	getkey get_click_r,2
+	getkey get_click_m,4
+	//左クリックの取得
+	/*
+	if(flag_get_click_l=0){
+		click_l=0
+		if(get_click_l=0){
+			flag_get_click_l=1
+		}
+	}else:if(flag_get_click_l=1){
+		if(get_click_l=1){
+			click_l=1
+			flag_get_click_l=0
+		}
+	}*/
+	
+	//右クリックの取得
+	/*
+	if(flag_get_click_r=0){
+		click_r=0
+		if(get_click_r=0){
+			flag_get_click_r=1
+		}
+	}else:if(flag_get_click_r=1){
+		if(get_click_r=1){
+			click_r=1
+			flag_get_click_r=0
+		}
+	}*/
+	
+	
+	// 左クリック処理
+	// クリック:1  ,  長押し:2
+	if(cl_last=1){
+		if(get_click_l=0){
+			if(clcnt<clickSpeed){
+				click_l = 1
+			}
+		}else:if(clcnt>=clickSpeed){
+			if(click_l=0){
+				click_l = 2
+			}else{
+				click_l = 99
+			}
+		}
+	}else{
+		click_l = 0
+		clcnt=0
+	}
+	cl_last = get_click_l
+	clcnt++
+	
+	
+	// 右クリック処理
+	// クリック:1  ,  長押し:2
+	if(cr_last=1){
+		if(get_click_r=0){
+			if(crcnt<clickSpeed){
+				click_r = 1
+			}
+		}else:if(crcnt>=clickSpeed){
+			if(click_r=0){
+				click_r = 2
+			}else{
+				click_r = 99
+			}
+		}
+	}else{
+		click_r = 0
+		crcnt=0
+	}
+	cr_last = get_click_r
+	crcnt++
+	
+	
+	//マウスクリックの取得
+	if(flag_get_click_m=0){
+		click_m=0
+		if(get_click_m=0){
+			flag_get_click_m=1
+		}
+	}else:if(flag_get_click_m=1){
+		if(get_click_m=1){
+			click_m=1
+			flag_get_click_m=0
+		}
+	}
+	return
+

@@ -1,0 +1,1122 @@
+#module
+#include "hspmix.as"			// 音量操作に利用
+/*==============================================*/
+/* PlayCD                                       */
+/*----------------------------------------------*/
+/* CDを再生する                                 */
+/*----------------------------------------------*/
+/* 引　数 : 再生するトラック(int)               */
+/*==============================================*/
+#deffunc PlayCD int track
+	playTrack@ = track
+	if(play@=2){
+		// 一時停止から復帰する場合
+		SeekCD(pausePosition@)
+	}else{
+		// その他、停止状態からの再生など通常の場合
+		mmplay cdAudio@+playTrack@-1
+		if(playTrack@=allTrack@){
+			// 最後のトラックのみ再生されない現象への応急処置
+			mci "seek myid to "+playTrack@+":00:00:00"
+			mci "play myid"
+		}
+		if(trackSP@(playTrack@-1)!=0){
+			SeekCD(trackSP@(playTrack@-1))
+		}
+	}
+	play@ = 1
+	return
+
+/*==============================================*/
+/* SeekCD                                       */
+/*----------------------------------------------*/
+/* CDをシークする                               */
+/*----------------------------------------------*/
+/* 引　数 : シークする再生位置,ミリ秒(int)      */
+/*==============================================*/
+#deffunc SeekCD int ms
+	mci "stop myid"
+	repeat 5
+		mci "seek myid to "+playTrack@+":"+SecondToTimeProgram(ms)
+		if((ms/100) = (GetNowPosition()/100) ){
+			break
+		}
+	loop
+	mci "play myid"
+	return
+
+/*==============================================*/
+/* PauseCD                                      */
+/*----------------------------------------------*/
+/* CDの再生を一時停止する                       */
+/*==============================================*/
+#deffunc PauseCD
+	play@ = 2
+	pausePosition@ = GetNowPosition()	// 停止位置取得
+	mci "stop myid"
+	return
+
+/*==============================================*/
+/* StopCD                                       */
+/*----------------------------------------------*/
+/* CDの再生を停止する                           */
+/*==============================================*/
+#deffunc StopCD
+	mmstop
+	play@ = 0
+	return
+
+/*==============================================*/
+/* getMasterVolume                              */
+/*----------------------------------------------*/
+/* ソフトのマスタボリュームを取得する           */
+/*==============================================*/
+#defcfunc getMasterVolume
+	retVol = 0
+	getvol retVol,0
+	return retVol
+
+/*==============================================*/
+/* setMasterVolume                              */
+/*----------------------------------------------*/
+/* ソフトのマスタボリュームを設定する           */
+/*==============================================*/
+#deffunc setMasterVolume int pintVol
+	setvol 0, pintVol
+	return
+	
+/*==============================================*/
+/* getMasterVolumePercent                       */
+/*----------------------------------------------*/
+/* スタボリュームの百分率値を取得する           */
+/*==============================================*/
+#defcfunc getMasterVolumePercent int pintVol
+	dbMaxVolume = 255.0
+	dbCurrentVolume = double(pintVol)
+	dbVolumeParcent = (dbCurrentVolume / dbMaxVolume)*100
+	return int(dbVolumeParcent)
+
+/*==============================================*/
+/* AutoTrackChenge                              */
+/*----------------------------------------------*/
+/* 自動トラック切り替え                         */
+/* 曲長さ-50ミリ秒に達したら次のトラックへ      */
+/*==============================================*/
+#deffunc AutoTrackChange
+	if(GetNowPosition() > GetTrackLength(playTrack@)-50 & play@=1){
+		NextTrack playTrack@,allTrack@,playMode@
+	}else:if(trackEP@(playTrack@-1)!=0 & GetNowPosition() >trackEP@(playTrack@-1) & play@=1){
+		NextTrack playTrack@,allTrack@,playMode@
+	}
+	return
+
+/*==============================================*/
+/* ShuffleArraySet                              */
+/*----------------------------------------------*/
+/* シャッフル再生時の再生用配列を構築する       */
+/*----------------------------------------------*/
+/* 引　数 : トラック一覧を格納する配列(array)   */
+/*        : 選曲回数を格納する配列(array)       */
+/*==============================================*/
+#deffunc ShuffleArraySet array pickupArray,array listArray
+	pickupCount = allTrack@+(favoriteTrack@*3)	// 選曲する回数
+	allTr = allTrack@		// 選曲する曲数
+	i = 0					// shuffleArrayの添え字
+	pickupTrack = 0			// 選曲されたトラック番号
+	listLength = permissionTrack*4+1	// ★ver4.10で変更
+	randomize
+	while i+1<=pickupCount
+		pickupTrack = rnd(allTr)
+		if(pickupCountArray@(pickupTrack)>0){
+			shuffleArray@(i)=trackListArray@(pickupTrack)
+			pickupCountArray@(pickupTrack)--
+			i++
+		}
+	wend
+	while i+1<= listLength
+		shuffleArray@(i)=-1		// シャッフル再生リストの終了トークンを入れる
+		i++
+	wend
+	return
+	
+/*==============================================*/
+/* PickupCountArraySet                          */
+/*----------------------------------------------*/
+/* 選曲回数を格納する配列を構築する             */
+/*==============================================*/
+#deffunc PicupCountArraySet
+	i=0
+	string = ""
+	repeat allTrack@
+		pickupCountArray@(i)=1+trackFV@(i)*3
+		//string=string+"("+int(i)+")"+pickupCountArray@(i)+","
+		i++
+	loop
+	pickupCountArray@(i)=-1
+	//string=string+pickupCountArray@(i)
+	//dialog string,0,"トラック選曲数"
+	return
+
+
+/*==============================================*/
+/* TrackListArraySet                            */
+/*----------------------------------------------*/
+/* トラックの一覧を格納する配列を構築する       */
+/*==============================================*/
+#deffunc TrackListArraySet
+	i=0
+	string = ""
+	repeat allTrack@
+		trackListArray@(i)=i+1
+		//string=string+"("+i+")"+trackListArray@(i)+","
+		i++
+	loop
+	trackListArray@(i)=-1
+	//string=string+trackListArray@(i)
+	//dialog string,0,"トラック番号一覧"
+	return
+
+
+
+/*==============================================*/
+/* ChangeTrack                                  */
+/*----------------------------------------------*/
+/* トラックを前後へ切り替える                   */
+/* 再生禁止曲はスキップする                     */
+/*----------------------------------------------*/
+/* 引　数 : 現在のトラック番号(int)             */
+/*        : 認識している全トラック数(int)       */
+/*        : スキップモード,1前へ,2次へ(int)     */
+/*        : 再生モード(int)                     */
+/*==============================================*/
+#deffunc ChangeTrack int nt,int at,int skipmode,int playmode
+	nowtrack=nt
+	alltrack=at
+	
+	// 前曲ボタン押下時、再生位置が秒以上の場合は同曲を最初から再生し直す
+	if(skipmode=1 & GetNowPosition()>(500+trackSP@(nt-1))){
+		nowtrack = playTrack@
+	}else{
+		// 追加ループ初期化
+		loopRimaining@ = 0
+		if(playmode = 3){
+			// シャッフル再生の場合
+			if(skipmode=1){
+				// 前の曲へ
+				do
+					nowtrack=rnd(allTrack)+1
+				until(trackNP@(nowtrack-1)=0)
+			}else:if(skipmode=2){
+				// 次の曲へ
+				do
+				nowtrack = shuffleArray@(shufflePointer@)
+				shufflePointer@++
+				if(nowtrack<=0){
+					// シャッフル再生リストの終点に到達
+					PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+					TrackListArraySet		// トラック一覧配列の構築
+					ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+					shufflePointer@ = 0
+					nowtrack = rnd(allTrack)+1
+				}
+				// dialog nowtrack,0,"nowtrack"
+				until(trackNP@(nowtrack-1)=0)
+			}
+		}else{
+			if(skipmode=1){
+				// 前の曲へ
+				do
+					nowtrack-=1
+					if(nowtrack=0){
+						nowtrack=alltrack
+					}
+				until(trackNP@(nowtrack-1)=0)
+			}else:if(skipmode=2){
+				// 次の曲へ
+				do
+					nowtrack+=1
+					if(nowtrack>alltrack){
+						nowtrack=1
+					}
+				until(trackNP@(nowtrack-1)=0)
+			}
+		}
+	}
+	PlayCD nowtrack
+	return
+
+/*==============================================*/
+/* NextTrack                                    */
+/*----------------------------------------------*/
+/* トラックを次へ進める                         */
+/* 再生禁止曲はスキップする                     */
+/*----------------------------------------------*/
+/* 引　数 : 現在のトラック番号(int)             */
+/*        : 認識している全トラック数(int)       */
+/*        : 再生モード(int)                     */
+/*==============================================*/
+#deffunc NextTrack int nt,int at,int pm
+	nowtrack=nt
+	alltrack=at
+	pmode = pm
+	flag=0
+	// 追加ループの残回数が残っていればループさせる(pmodeを1にして1曲ループで処理する)
+	// ただし元々1曲ループの場合はスキップする
+	if(pmode!=1 & loopRimaining@>0){
+		ConsumeLoopRimaining
+		pmode=1
+	}
+	
+	if(pmode=0){
+		// 通常再生の場合
+		// 次の曲へ進める。最後の曲が終わったら再生を停止する
+		do
+			nowtrack+=1
+			if(nowtrack>alltrack){
+				nowtrack=1
+				flag=1
+			}
+		until(trackNP@(nowtrack-1)=0)
+		// 最後の曲が終わったら再生を停止、そうでなければ次を再生
+		if(flag=1){
+			playTrack@=nowtrack
+			StopCD
+		}else{
+			PlayCD nowtrack
+		}
+		loopRimaining@ = 0		// 追加ループの残回数を消す
+	}else:if(pmode=1){
+		// 1曲ループ再生の場合
+		// 同じ曲を再生する
+		PlayCD nowtrack
+	}else:if(pmode=2){
+		// 全曲ループ再生の場合
+		// 次の曲へ進める。最後の曲が終わったら再生を停止する
+		do
+			nowtrack+=1
+			if(nowtrack>alltrack){
+				nowtrack=1
+			}
+		until(trackNP@(nowtrack-1)=0)
+		PlayCD nowtrack
+		playTrack@ = nowtrack
+		loopRimaining@ = 0		// 追加ループの残回数を消す
+	}else:if(pmode=3){
+		// シャッフル再生の場合
+		// シャッフル再生リストに従って再生する。
+		// 再生リストの終点（－１）を見つけたら次のリストを構築して再生する。
+		do
+			nowtrack = shuffleArray@(shufflePointer@)
+			shufflePointer@++
+			if(nowtrack<=0){
+				// シャッフル再生リストの終点に到達
+				PicupCountArraySet		// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+				TrackListArraySet		// トラック一覧配列の構築
+				ShuffleArraySet pickupCountArray,trackListArray	// シャッフル再生リストの構築
+				shufflePointer@ = 0
+				nowtrack = rnd(allTrack)+1
+			}
+		until(trackNP@(nowtrack-1)=0)
+		PlayCD nowtrack
+		playTrack@ = nowtrack
+		loopRimaining@ = 0		// 追加ループの残回数を消す
+	}
+	return
+
+
+
+
+#deffunc ConsumeLoopRimaining
+	loopRimaining@--
+	if(loopRimaining@<0){
+		loopRimaining@=0
+	}
+	return
+
+/*==============================================*/
+/* CreateCDCode                                 */
+/*----------------------------------------------*/
+/* track情報配列の内容をリセットする            */
+/*----------------------------------------------*/
+/* 引  数 : リセットするtrack情報配列(array)    */
+/*==============================================*/
+#defcfunc CreateCDCode int tr
+	cdcode = str(tr)
+	i=1
+	repeat tr
+		cdcode = cdcode + str(GetTrackLength(i))
+		i++
+	loop
+	return cdcode
+
+/*==============================================*/
+/* CreateBitTrackData                           */
+/*----------------------------------------------*/
+/* 0か1で保存するトラック設定をセーブ用データ   */
+/* に変換する                                   */
+/*----------------------------------------------*/
+/* 引  数 : 対象とするtrack情報配列(array)      */
+/* 戻り値 : 生成されたセーブ用データ            */
+/*==============================================*/
+#defcfunc CreateBitTrackData array data
+	bitData = ""
+	i = 0
+	repeat allTrack@
+		bitData = bitData + str(data(i))
+		i++
+	loop
+	bitData = bitData + "*"
+	return bitData
+
+/*==============================================*/
+/* CreateTimeTrackData                          */
+/*----------------------------------------------*/
+/* ミリ秒で保存するトラック設定をセーブ用データ */
+/* に変換する                                   */
+/*----------------------------------------------*/
+/* 引  数 : 対象とするtrack情報配列(array)      */
+/* 戻り値 : 生成されたセーブ用データ            */
+/*==============================================*/
+#defcfunc CreateTimeTrackData array data
+	bitData = ""
+	trackDataTmp = ""
+	i = 0
+	repeat allTrack@
+		if(data(i)<10){
+			trackDataTmp = "00000"+str(data(i))
+		}else:if(data(i)<100){
+			trackDataTmp = "0000"+str(data(i))
+		}else:if(data(i)<1000){
+			trackDataTmp = "000"+str(data(i))
+		}else:if(data(i)<10000){
+			trackDataTmp = "00"+str(data(i))
+		}else:if(data(i)<100000){
+			trackDataTmp = "0"+str(data(i))
+		}else{
+			trackDataTmp = str(data(i))
+		}
+		bitData = bitData + trackDataTmp
+		i++
+	loop
+	bitData = bitData + "******"
+	return bitData
+
+/*==============================================*/
+/* LoadSaveTitle                                */
+/*----------------------------------------------*/
+/* 既存のトラック設定データの名前を読み込む     */
+/*----------------------------------------------*/
+/* 引  数 : トラック設定保存のページ番号(int)   */
+/*==============================================*/
+#deffunc LoadSaveTitle
+	c = 0
+	notesel n
+	noteload "system\\data\\trackdata.dat"
+	repeat 50
+		noteget saveTitleList@(c),c*6+11
+//		dialog "行番号:"+(c*6+p*5+11),0,"完了"
+		c++
+	loop
+	return
+
+/*==============================================*/
+/* SaveTrackData                                */
+/*----------------------------------------------*/
+/* トラック設定情報を保存する                   */
+/*----------------------------------------------*/
+/* 引  数 : データインデックス(int)             */
+/*==============================================*/
+#deffunc SaveTrackData int number
+	if(number < 0){
+		// データインデックスが負数なら何もしない
+	}else{
+		no = number
+		no = no*6+11
+		// ファイル入出力処理
+		// マスタ音量とトラック音量の保存を追加する。
+		notesel n
+		noteload "system\\data\\trackdata.dat"
+		noteadd saveDataTitle@,no,1						// 保存タイトル
+		noteadd CdCode@,no+1,1							// CDシグネチャコード
+		noteadd CreateBitTrackData(trackNP@),no+2,1		// 再生禁止曲設定コード
+		noteadd CreateBitTrackData(trackFV@),no+3,1		// お気に入り曲設定コード
+		noteadd CreateTimeTrackData(trackSP@),no+4,1	// ココカラ設定コード
+		noteadd CreateTimeTrackData(trackEP@),no+5,1	// ココマデ設定コード
+		notesave "system\\data\\trackdata.dat"
+	}
+	return
+
+/*==============================================*/
+/* SaveConvData                                 */
+/*----------------------------------------------*/
+/* 変換した旧トラック設定情報を保存する         */
+/*----------------------------------------------*/
+/* 引  数 : データインデックス(int)             */
+/*        : データタイトル(str)                 */
+/*        : 再生禁止曲データ(str)               */
+/*==============================================*/
+#deffunc SaveConvData int number,str dataTitle,str trackNP
+	if(number < 0){
+		// データインデックスが負数なら何もしない
+	}else{
+		no = number
+		dt = dataTitle
+		np = trackNP
+		no = no*6+11
+		// ファイル入出力処理
+		notesel n
+		noteload "system\\data\\trackdata.dat"
+		noteadd dt,no,1								// 保存タイトル
+		noteadd "0",no+1,1							// CDシグネチャコード
+		noteadd np,no+2,1							// 再生禁止曲設定コード
+		noteadd "*",no+3,1							// お気に入り曲設定コード
+		noteadd "******",no+4,1						// ココカラ設定コード
+		noteadd "******",no+5,1						// ココマデ設定コード
+		notesave "system\\data\\trackdata.dat"
+	}
+	return
+
+/*==============================================*/
+/* RestoreSaveData                              */
+/*----------------------------------------------*/
+/* 保存データの内容をリストアする               */
+/* CDシグネチャーコードが無ければ設定有無の確認 */
+/*----------------------------------------------*/
+/* 引　数 : データインデックス(int)             */
+/*==============================================*/
+#deffunc RestoreSaveData int number
+	if(number < 0){
+		// データインデックスが負数なら何もしない
+	}else{
+		no = number
+		no = no*6+11
+		// 保存データの復元
+		notesel n
+		noteload "system\\data\\trackdata.dat"
+		noteget sign,no+1
+		noteget string,no+2 : RestoreBitTrackNP(string)
+		noteget string,no+3 : RestoreBitTrackFV(string)
+		noteget string,no+4 : RestoreTimeTrackSP(string)
+		noteget string,no+5 : RestoreTimeTrackEP(string)
+		if(sign="0"){	// シグネチャーコードが無い
+			dialog "このデータにはCD識別コードが設定されていません。\n\n現在挿入されているCDの識別コードを設定しますか？",2,"CD識別コードの設定"
+			if(stat = 6){
+				noteadd CdCode@,no+1,1
+				notesave "system\\data\\trackdata.dat"
+				dialog "CD識別コードを設定しました。",0,"CD識別コードの設定"
+			}
+		}
+	}
+	return
+
+/*==============================================*/
+/* SaveAuto                                     */
+/*----------------------------------------------*/
+/* 自動保存内容を保存する                       */
+/*==============================================*/
+#deffunc SaveAuto
+	no = 5
+	notesel n
+	noteload "system\\data\\trackdata.dat"
+	noteadd ""+playMode@,no,1						// 再生モード
+	noteadd CreateBitTrackData(trackNP@),no+1,1		// 再生禁止曲設定コード
+	noteadd CreateBitTrackData(trackFV@),no+2,1		// お気に入り曲設定コード
+	noteadd CreateTimeTrackData(trackSP@),no+3,1	// ココカラ設定コード
+	noteadd CreateTimeTrackData(trackEP@),no+4,1	// ココマデ設定コード
+	// （●●）アプリ音量のオートセーブを追加する
+	notesave "system\\data\\trackdata.dat"
+	return
+
+/*==============================================*/
+/* RestoreAutoSaveData                          */
+/*----------------------------------------------*/
+/* 自動保存データの内容をリストアする           */
+/* 設定により処理のON/OFFができる               */
+/*==============================================*/
+#deffunc RestoreAutoSaveData
+	// 自動保存データの復元（設定でON/OFF）
+	// 自動保存をしない設定であればスキップする
+	if(settingData@(3)=1){
+		notesel autodata
+		noteload "system\\data\\trackdata.dat"
+		noteget string,5 : playMode@=int(string)
+		noteget string,6 : RestoreBitTrackNP(string)
+		noteget string,7 : RestoreBitTrackFV(string)
+		noteget string,8 : RestoreTimeTrackSP(string)
+		noteget string,9 : RestoreTimeTrackEP(string)
+	}
+	return
+
+/*==============================================*/
+/* SearchDataByCdCode                           */
+/*----------------------------------------------*/
+/* CDのシグネチャコードを元に設定を探す         */
+/* 同一シグネチャコードが記録されたデータが複数 */
+/* 存在する場合は一番最初に発見したデータのイン */
+/* デックスを返す                               */
+/*----------------------------------------------*/
+/* 引　数 : CDシグネチャコード(str)             */
+/* 戻り値 : データインデックス(int)             */
+/*==============================================*/
+#defcfunc SearchDataByCdCode str code
+	ret = -1
+	n = 11
+	sNumber = 0
+	if(code = "0"){
+		// シグネチャコードが 0 なら検索しない
+	}else{
+		// 検索してデータインデックスを算出、retに算出結果を設定して返す
+		c = code
+		notesel autodata
+		noteload "system\\data\\trackdata.dat"
+		repeat trackDataSaveSlot@
+			noteget string,(n+1)+sNumber*6
+			if(string = c){
+				ret = sNumber
+				break
+			}
+			sNumber++
+		loop
+	}
+	return ret
+
+/*==============================================*/
+/* RestoreBitTrackNP                            */
+/*----------------------------------------------*/
+/* ビットデータを設定データに変換する           */
+/* データの設定先は再生禁止曲trackNP            */
+/*==============================================*/
+#deffunc RestoreBitTrackNP str bit
+	b = bit
+	data = ""
+	i = 0
+	flag = 0
+	repeat
+		if(flag=0){
+			data = strmid(b,i,1)
+			if(data="*"){
+				flag=1
+			}else{
+				trackNP@(i) = int(data)
+			}
+		}else{
+			trackNP@(i) = 0
+		}
+		i++
+		if(i=allTrack@){
+			break
+		}
+	loop
+	return
+
+/*==============================================*/
+/* RestoreBitTrackFV                            */
+/*----------------------------------------------*/
+/* ビットデータを設定データに変換する           */
+/* データの設定先はお気に入り曲trackFV          */
+/*==============================================*/
+#deffunc RestoreBitTrackFV str bit
+	b = bit
+	data = ""
+	j = 0
+	flag = 0
+	repeat
+		if(flag=0){
+			data = strmid(b,j,1)
+			if(data="*"){
+				flag=1
+			}else{
+				trackFV@(j) = int(data)
+			}
+		}else{
+			trackFV@(j) = 0
+		}
+		j++
+		if(j=allTrack@){
+			break
+		}
+	loop
+	favoriteTrack@ = TrackSettingCount(trackFV@,allTrack@)
+	PicupCountArraySet									// シャッフル再生順の決定に利用する“選曲回数を格納する配列”を構築
+	TrackListArraySet									// トラック一覧配列の構築
+	ShuffleArraySet pickupCountArray@,trackListArray@	// シャッフル再生リストの構築
+	return
+
+/*==============================================*/
+/* RestoreTimeTrackSP                           */
+/*----------------------------------------------*/
+/* タイムデータを設定データに変換する           */
+/* データの設定先はココカラtrackSP              */
+/*==============================================*/
+#deffunc RestoreTimeTrackSP str time
+	t = time
+	data = ""
+	i = 0
+	flag = 0
+	repeat
+		if(flag=0){
+			data = strmid(t,i*6,6)
+			if(data="******"){
+				flag=1
+			}else{
+				trackSP@(i) = int(data)
+			}
+		}else{
+			trackSP@(i) = 0
+		}
+		i++
+		if(i=allTrack@){
+			break
+		}
+	loop
+	return
+	
+/*==============================================*/
+/* RestoreTimeTrackEP                           */
+/*----------------------------------------------*/
+/* タイムデータを設定データに変換する           */
+/* データの設定先はココマデtrackEP              */
+/*==============================================*/
+#deffunc RestoreTimeTrackEP str time
+	t = time
+	data = ""
+	i = 0
+	flag = 0
+	repeat
+		if(flag=0){
+			data = strmid(t,i*6,6)
+			if(data="******"){
+				flag=1
+			}else{
+				trackEP@(i) = int(data)
+			}
+		}else{
+			trackEP@(i) = 0
+		}
+		i++
+		if(i=allTrack@){
+			break
+		}
+	loop
+	return
+
+/*==============================================*/
+/* ConvertData                                  */
+/*----------------------------------------------*/
+/* 旧バージョンの設定データを最新の形式に変換   */
+/* 変換したデータはファイルに上書き保存する     */
+/* 最新の形式 : ファイルバージョン/3            */
+/*==============================================*/
+#deffunc ConvertData
+	noteLine = 0
+	dataIndex = 0
+	notesel oldData
+	noteload "C:\\takas\\twf001\\movedata.dat"
+	noteget v,noteLine
+	noteLine++
+	if(v=2){
+		// 正常なファイルの場合
+		dialog "旧バージョン(ver3.62)で利用されていた設定ファイルを発見しました。\n\n設定を引き継ぎますか？",2,"設定ファイルの引き継ぎ"
+		if(stat=6){
+			// 保存トラックデータの引き継ぎ
+			repeat 25
+				dataTitle = ""
+				dataNP = ""
+				notesel oldData
+				noteload "C:\\takas\\twf001\\movedata.dat"
+				noteget dataTitle,noteLine
+				noteget dataNP,noteLine+1
+				dataNP=dataNP+"*"
+				SaveConvData dataIndex,dataTitle,dataNP
+				dataIndex++
+				noteLine+=2
+			loop
+			// オートセーブデータ（トラックデータ）の引き継ぎ
+			dataNP = ""
+			playmode = ""
+			noteLine = 111
+			notesel oldData
+			noteload "C:\\takas\\twf001\\movedata.dat"
+			repeat 20				// 再生禁止曲設定データの変換
+				noteget string,noteLine
+				dataNP=dataNP+string
+				noteLine++
+			loop
+			dataNP=dataNP+"*"
+			noteget playmode,132	// 再生モード情報データの取得
+			notesel oldData
+			noteload "system\\data\\trackdata.dat"
+			noteadd playmode,5,1	// 再生モードの保存
+			noteadd dataNP,6,1		// 再生禁止曲設定の保存
+			noteadd "*",7,1			// お気に入り曲設定の保存
+			noteadd "******",8,1	// ココカラ設定の保存
+			noteadd "******",9,1	// ココマデ設定の保存
+			notesave "system\\data\\trackdata.dat"
+			// ソフトウェア設定の引継ぎ
+			notesel oldData
+			noteload "C:\\takas\\twf001\\movedata.dat"
+			noteget string,105 : settingData@(0) = int(string)	// 起動時に自動バージョン確認を行う
+			noteget string,106 : settingData@(1) = int(string)	// ソフト起動時にCDを自動再生する
+//			noteget ,107	// 操作ガイドを表示する
+			noteget string,108 : settingData@(3) = int(string)	// 現在の各再生設定を次回起動時まで保持する
+			noteget string,109 : settingData@(2) = int(string)	// 非アクティブ時はウインドウ名に再生情報を表示する
+			settingData@(4)=0									// CDに応じて自動で再生設定を切り替える
+			notesel systemdata
+			noteload "system\\data\\systemdata.dat"
+			noteadd "5", 25,0				// 音量値
+			noteadd "0", 26,0
+			noteadd ""+settingData@(0),27,1
+			noteadd ""+settingData@(1),28,1
+			noteadd ""+settingData@(2),29,1
+			noteadd ""+settingData@(3),30,1
+			noteadd ""+settingData@(4),31,1
+			noteadd "1" ,32,1				// 音量値の表示
+			noteadd "1" ,33,1				// 操作案内の表示(ver4系列が初めての人のために、初期状態で表示させる。)
+			notesave "system\\data\\systemdata.dat"
+			delete "C:\\takas\\twf001\\movedata.dat"
+			dialog "変換と引き継ぎ作業が完了しました。",0,"設定ファイルの引き継ぎ"
+		}else{
+			dialog "設定ファイルを削除しますか？\n\n以前ご利用いただいたバージョンから設定を引き継がない場合は、\r\n削除しても問題ありません。",2,"設定ファイルの引き継ぎ"
+			if(stat=6){
+				delete "C:\\takas\\twf001\\movedata.dat"
+				dialog "設定ファイルを削除しました。",0,"設定ファイルの引き継ぎ"
+			}
+		}
+	}else{
+		// ファイルバージョンが合わない場合
+		// 同系列のデータはここでバージョンデータ（ソフトのバージョン）を読みだしてチェックする
+		noteLine = 9
+		noteget v,noteLine
+		if(v = "400" | v = "401" | v = "410"){
+			// 正常なファイルの場合
+			dialog "旧バージョン(ver"+VersionIntToString(int(v))+")で利用されていた設定ファイルを発見しました。\n\n設定を引き継ぎますか？",2,"設定ファイルの引き継ぎ"
+			if(stat=6){
+				// ソフトのバージョンがv400
+				noteadd "420",noteLine,1		// ソフトウェアバージョン
+				noteadd "10",17,1				// <TrackAreaMoveOnce>
+				noteadd "24",19,1				// <TrackAreaMoveSpeed>
+				noteadd "8" ,21,1				// <TrackAreaScroll>
+				noteadd "5", 25,0				// 音量値
+				noteadd "0", 26,0
+				noteadd "1" ,32,0				// 音量値の表示
+				noteadd "0" ,33,0				// 操作案内の表示(既にver4系列経験者であるため、初期状態では表示しない。)
+				notesave "system\\data\\systemdata.dat"
+				bcopy "C:\\takas\\twf001\\movetrack.dat","system\\data\\trackdata.dat"
+				delete "C:\\takas\\twf001\\movetrack.dat"
+				delete "C:\\takas\\twf001\\movedata.dat"
+				dialog "変換と引き継ぎ作業が完了しました。",0,"設定ファイルの引き継ぎ"
+			}else{
+				dialog "設定ファイルを削除しますか？\n\n以前ご利用いただいたバージョンから設定を引き継がない場合は、\r\n削除しても問題ありません。",2,"設定ファイルの引き継ぎ"
+				if(stat=6){
+					delete "C:\\takas\\twf001\\movetrack.dat"
+					delete "C:\\takas\\twf001\\movedata.dat"
+					dialog "設定ファイルを削除しました。",0,"設定ファイルの引き継ぎ"
+				}
+			}
+		}
+	}
+	return
+
+/*==============================================*/
+/* ResetTrackArray                              */
+/*----------------------------------------------*/
+/* track情報配列の内容をリセットする            */
+/*----------------------------------------------*/
+/* 引  数 : リセットするtrack情報配列(array)    */
+/*==============================================*/
+#deffunc ResetTrackArray array trackArray , int pm
+	n=0
+	while n<pm
+		trackArray(n) =  0
+		n+=1
+	wend
+	return
+
+/*==============================================*/
+/* SetTrackNP                                   */
+/*----------------------------------------------*/
+/* trackNP配列の内容を設定する                  */
+/*----------------------------------------------*/
+/* 引　数 : 設定するトラック(int)               */
+/*==============================================*/
+#deffunc SetTrackNP int track
+	trackNP@(track) = trackNP@(track) xor 1
+	return
+
+/*==============================================*/
+/* SetTrackFV                                   */
+/*----------------------------------------------*/
+/* trackFV配列の内容を設定する                  */
+/*----------------------------------------------*/
+/* 引　数 : 設定するトラック(int)               */
+/*==============================================*/
+#deffunc SetTrackFV int track
+	trackFV@(track) = trackFV@(track) xor 1
+	return
+
+/*==============================================*/
+/* SetTrackSP                                   */
+/*----------------------------------------------*/
+/* trackSP配列の内容を設定する                  */
+/*----------------------------------------------*/
+/* 引　数 : 設定するトラック(int)               */
+/*        : 設定する時間-ミリ秒(int)            */
+/*==============================================*/
+#deffunc SetTrackSP int track, int time
+	// ココマデの時間より小さい場合のみ設定する
+	if(time < trackEP@(track)){
+		trackSP@(track) = time
+	}
+	return
+
+/*==============================================*/
+/* SetTrackEP                                   */
+/*----------------------------------------------*/
+/* trackEP配列の内容を設定する                  */
+/*----------------------------------------------*/
+/* 引　数 : 設定するトラック(int)               */
+/*        : 設定する時間-ミリ秒(int)            */
+/*==============================================*/
+#deffunc SetTrackEP int track, int time
+	// ココカラの設定より大きい場合のみ設定する
+	if(time > trackSP@(track)){
+		trackEP@(track) = time
+	}
+	return
+	
+/*==============================================*/
+/* ChengeFontSize                               */
+/*----------------------------------------------*/
+/* フォントサイズを変更する命令                 */
+/*----------------------------------------------*/
+/* 引　数 : フォントサイズ(int)                 */
+/*==============================================*/
+#deffunc ChangeFontSize int size
+	font "HGSｺﾞｼｯｸE",size
+	//font "メイリオ",size
+	return
+	
+/*==============================================*/
+/* ImageAlphaSet                                */
+/*----------------------------------------------*/
+/* 画像に含まれる既定の色を透明色にする         */
+/* 引数で画像全体を半透明にすることも可         */
+/*----------------------------------------------*/
+/* 引　数 : 半透明有無(int)                     */
+/*==============================================*/
+#deffunc ImageAlphaSet int alpha
+	color 66,66,66
+	if(alpha=0){
+		gmode 4,0,0,256
+	}else{
+		gmode 4,0,0,150
+	}
+	return
+
+/*==============================================*/
+/* ImageAlphaReset                              */
+/*----------------------------------------------*/
+/* 透明色の設定をリセットする                   */
+/*==============================================*/
+#deffunc ImageAlphaReset
+	gmode 1,0,0,256
+	return
+
+/*==============================================*/
+/* MousePosGet                                  */
+/*----------------------------------------------*/
+/* マウスの座標を指定された座標軸で返す         */
+/* 戻り値の整数はマウスの座標                   */
+/*----------------------------------------------*/
+/* 引　数 : 座標軸(str)                         */
+/* 戻り値 : 座標(int)                           */
+/*==============================================*/
+#defcfunc MousePosGet str dir
+	if(ginfo(2)=0){
+		framesize=(ginfo(10)-ginfo(12))/2         //ウィンドウ枠の幅
+   		titlesize=ginfo(11)-ginfo(13)-framesize   //タイトルバーの幅
+		if(dir="x" | dir="X"){
+			mouse_x=ginfo(0)                          //マウス座標χの取得
+			window_x=ginfo(4)                         //ウインドウ座標χの取得
+			ret=mouse_x-(window_x+framesize)     	  //ウインドウ表示内のマウス座標χ
+		}else:if(dir="y" | dir="Y"){
+			mouse_y=ginfo(1)                          //マウス座標ｙの取得
+			window_y=ginfo(5)                         //ウインドウ座標ｙの取得
+			ret=mouse_y-(window_y+titlesize)    	  //ウインドウ表示内のマウス座標ｙ
+		}else{
+			ret=-1
+		}
+	}else{
+		ret=-1
+	}
+	return ret
+
+/*==============================================*/
+/* CheckTrackCD                                 */
+/*----------------------------------------------*/
+/* CDのトラック数をチェックする                 */
+/* トラック数は戻り値として返す                 */
+/*----------------------------------------------*/
+/* 引　数 : mmload実行フラグ,1行う(int)         */
+/* 戻り値 : トラック数(int)                     */
+/*==============================================*/
+#defcfunc CheckTrackCD int mmloadflag
+	// mciコマンドでトラック数を取得(取得値はstatに格納される)
+	t=0
+	mci "open cdaudio alias myid"
+	mci "status myid number of tracks"
+	t = stat
+	if(t!=-1 & mmloadflag=1){
+   		n=0
+   		while n < t
+ 			mmload "CD:"+int(n+1),cdAudio@+n,0
+ 			n+=1
+   		wend
+   	}
+   	// 60トラックを超えるCDの場合は再生させない
+   	if(t>permissionTrack@){
+	   	if(alertByTrackOverFlagChange@=0){
+			alertByTrackOverFlag@=t			// 警告表示フラグに認識したトラック数を格納（→フラグON）
+			alertByTrackOverFlagChange@=1	// 警告表示フラグの変更フラグをへし折る（→連続で警告が表示されない）
+		}
+		t=-1
+	}
+	return t
+
+/*==============================================*/
+/* GetTrackLength                               */
+/*----------------------------------------------*/
+/* 引数で指定されたトラックの長さを取得する     */
+/*----------------------------------------------*/
+/* 引　数 : トラック番号(int)                   */
+/* 戻り値 : トラック長さ-ミリ秒(int)            */
+/*==============================================*/
+#defcfunc GetTrackLength int track
+	mci "status myid length track "+track 
+	ttime=refstr
+	tm=int(strmid(ttime,0,2))
+	ts=int(strmid(ttime,3,2))
+	tf=int(strmid(ttime,6,2))
+	return TimeToSecond(tm,ts,tf)
+
+/*==============================================*/
+/* GetNowPosition                               */
+/*----------------------------------------------*/
+/* 現在の再生位置を取得する                     */
+/*----------------------------------------------*/
+/* 戻り値 : 再生位置-ミリ秒(int)                */
+/*==============================================*/
+#defcfunc GetNowPosition
+	mci "status myid position"
+	ttmmssff=refstr
+	ttime=strmid(ttmmssff,3,5)
+	tm=int(strmid(ttime,0,2))
+	ts=int(strmid(ttime,3,2))
+	tf=int(strmid(ttmmssff,9,2))
+	return TimeToSecond(tm,ts,tf)
+
+/*==============================================*/
+/* VersionIntToString                           */
+/*----------------------------------------------*/
+/* 数値版バージョン表記を〇.〇〇形式に変換      */
+/* 変換したものを文字列で返す                   */
+/*----------------------------------------------*/
+/* 引　数 : 数値版バージョン(int)               */
+/* 戻り値 : 文字列バージョン(str)               */
+/*==============================================*/
+#defcfunc VersionIntToString int verInt
+	verStr1 = str(verInt/100)
+	verStr2 = str((verInt/10)\10)
+	verStr3 = str(verInt\10)
+	return verStr1 + "." + verStr2 + verStr3
+
+
+/*==============================================*/
+/* TimeToSecond                                 */
+/*----------------------------------------------*/
+/* 分秒ミリ秒をミリ秒に変換する                 */
+/* 変換したミリ秒を整数で返す                   */
+/*----------------------------------------------*/
+/* 引　数 : 分(int) , 秒(int) , ミリ秒(int)     */
+/* 戻り値 : ミリ秒(int)                         */
+/*==============================================*/
+#defcfunc TimeToSecond int m,int s,int f
+	return ((m*60)+s)*100+f
+
+/*==============================================*/
+/* SecondToTime                                 */
+/*----------------------------------------------*/
+/* ミリ秒を時間表示に変換する                   */
+/* 変換した時間表示を文字列で返す               */
+/*----------------------------------------------*/
+/* 引　数 : ミリ秒(int)                         */
+/* 戻り値 : 時間表示(str)                       */
+/*==============================================*/
+#defcfunc SecondToTime int timeInt
+	time = timeInt
+	time = time/100			// ミリ秒切り落とし
+	m = str(time/60)		// 分表示は強制２ケタ表示にしない
+	/*if((time/60)>599){	// このコメントを外すと強制２ケタ表示になる
+		m = str(time/60)
+	}else{
+		m = "0"+int(time/60)
+	}*/
+	time\=60
+	if(time>9){
+		s = str(time)
+	}else{
+		s = "0"+time
+	}
+	return m+":"+s
+
+/*==============================================*/
+/* SecondToTime                                 */
+/*----------------------------------------------*/
+/* ミリ秒を時間表示に変換する                   */
+/* 変換した時間表示を文字列で返す               */
+/*----------------------------------------------*/
+/* 引　数 : ミリ秒(int)                         */
+/* 戻り値 : 時間表示(str)                       */
+/*==============================================*/
+#defcfunc SecondToTimeProgram int timeInt
+	time = timeInt
+	if((time\100)>10){
+		ms = str(time\100)		// ミリ秒の抽出
+	}else{
+		ms = "0"+str(time\100)
+	}
+	time = time / 100		// ミリ秒切り落とし
+	m = str(time/60)
+	if((time/60)>599){		// このコメントを外すと強制２ケタ表示になる
+		m = str(time/60)
+	}else{
+		m = "0"+int(time/60)
+	}
+	time\=60
+	if(time>9){
+		s = str(time)
+	}else{
+		s = "0"+time
+	}
+	return m+":"+s+":"+ms
+
+/*==============================================*/
+/* TrackSettingCount                            */
+/*----------------------------------------------*/
+/* トラック設定が設定されているトラックを数える */
+/* 数えた設定数を整数で返す                     */
+/* 引数で与えられた設定配列の内部を数える       */
+/*----------------------------------------------*/
+/* 引　数 : トラック設定の配列 , 全トラック数   */
+/* 戻り値 : 設定数(int)                         */
+/*==============================================*/
+#defcfunc TrackSettingCount array trackArray,int track
+	ret=0
+	for x,0,track+1,1
+		if(trackArray(x)=1){
+			ret++
+		}
+	next
+	return ret
+
+#global
